@@ -1,0 +1,15 @@
+[project]
+name = "yieldseeker-api"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "alembic==1.15.1",
+    "kiba-core[core-api,database-psql,queue-sqs,requester,storage,web3]==0.5.3.dev44",
+]
+
+[dependency-groups]
+dev = [
+    "kiba-core[types]==0.5.3.dev44",
+    "kiba-build==0.1.11.dev9",
+    "devtools>=0.12.2",
+]

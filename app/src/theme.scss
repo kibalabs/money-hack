@@ -1,0 +1,109 @@
+@use '@kibalabs/ui-react/styles.scss' as ui;
+@use '@kibalabs/ui-react-toast/styles.scss' as toast;
+
+
+// Host Grotesk font from Google Fonts
+@import url('https://fonts.googleapis.com/css2?family=Host+Grotesk:ital,wght@0,300..800;1,300..800&display=swap');
+
+// Color mixing functions (same as ui-react)
+@function lighten($color, $amount) {
+  @return color-mix(in srgb, #{$color}, white #{$amount});
+}
+
+@function darken($color, $amount) {
+  @return color-mix(in srgb, #{$color}, black #{$amount});
+}
+
+:root {
+  // Shared spacing/sizing variables
+  --kiba-padding: 0.5rem;
+  --kiba-padding-narrow: 0.25rem;
+  --kiba-padding-wide: 1rem;
+  --kiba-padding-wide2: 2rem;
+
+  // Typography
+  --kiba-font-family: "Host Grotesk", system-ui, sans-serif;
+  --kiba-font-size: 16px;
+
+  // Borders
+  --kiba-border-radius: 0.5rem;
+
+  // Core Colors
+  --kiba-color-background: #050505;
+  --kiba-color-brand-primary: #69F0AE;
+  --kiba-color-brand-secondary: #3B82F6;
+  --kiba-color-success: #22c55e;
+  --kiba-color-warning: #f59e0b;
+  --kiba-color-error: #ef4444;
+  --kiba-color-text: #f8fafc;
+  --kiba-color-text-on-brand: #000000;
+
+  // Logo for dark mode
+  --logo-wordmark-url: '/assets/wordmark-noback-dark.svg';
+  --logo-icon-url: '/assets/icon-noback.svg';
+
+  // Box/Card Colors (dark mode)
+  --box-background-color: rgba(0, 20, 10, 0.6);
+  --box-border-color: rgba(255, 255, 255, 0.1);
+
+  // Accordion hover (dark mode)
+  --accordion-hover-bg: rgba(255, 255, 255, 0.03);
+  --accordion-hover-border: rgba(255, 255, 255, 0.15);
+
+  @media (prefers-color-scheme: light) {
+    // Core Colors
+    --kiba-color-background: #FFFFFF;
+    --kiba-color-brand-primary: #34D399;
+    --kiba-color-brand-secondary: #66CCFF;
+    --kiba-color-success: #22c55e;
+    --kiba-color-warning: #b58108;
+    --kiba-color-error: #ef4444;
+    --kiba-color-text: #111827;
+    --kiba-color-text-on-brand: #000000;
+
+    // Logo filter for light mode (invert dark logo to show properly)
+    --logo-filter: none;
+    --logo-wordmark-url: '/assets/wordmark-noback.svg';
+    --logo-icon-url: '/assets/icon-noback.svg';
+
+    // Box/Card Colors (light mode)
+    --box-background-color: rgba(249, 250, 251, 0.95);
+    --box-border-color: rgba(0, 0, 0, 0.08);
+
+    // Accordion hover (light mode)
+    --accordion-hover-bg: rgba(0, 0, 0, 0.02);
+    --accordion-hover-border: rgba(0, 0, 0, 0.12);
+
+    // In light mode, "lightXX" should darken and "darkXX" should lighten.
+    // We regenerate the variants with swapped logic for all standard colors.
+    $colors: 'background', 'brand-primary', 'brand-secondary', 'text', 'text-on-brand', 'disabled', 'disabled-text', 'error', 'success', 'warning';
+
+    @each $name in $colors {
+      // "light" variants now darken (for light mode contrast)
+      --kiba-color-#{$name}-light01: #{darken(var(--kiba-color-#{$name}), 1%)};
+      --kiba-color-#{$name}-light05: #{darken(var(--kiba-color-#{$name}), 5%)};
+      --kiba-color-#{$name}-light10: #{darken(var(--kiba-color-#{$name}), 10%)};
+      --kiba-color-#{$name}-light20: #{darken(var(--kiba-color-#{$name}), 20%)};
+      --kiba-color-#{$name}-light25: #{darken(var(--kiba-color-#{$name}), 25%)};
+      --kiba-color-#{$name}-light50: #{darken(var(--kiba-color-#{$name}), 50%)};
+      --kiba-color-#{$name}-light75: #{darken(var(--kiba-color-#{$name}), 75%)};
+      --kiba-color-#{$name}-light80: #{darken(var(--kiba-color-#{$name}), 80%)};
+      --kiba-color-#{$name}-light90: #{darken(var(--kiba-color-#{$name}), 90%)};
+      --kiba-color-#{$name}-light95: #{darken(var(--kiba-color-#{$name}), 95%)};
+      --kiba-color-#{$name}-light99: #{darken(var(--kiba-color-#{$name}), 99%)};
+
+      // "dark" variants now lighten (for light mode contrast)
+      --kiba-color-#{$name}-dark01: #{lighten(var(--kiba-color-#{$name}), 1%)};
+      --kiba-color-#{$name}-dark05: #{lighten(var(--kiba-color-#{$name}), 5%)};
+      --kiba-color-#{$name}-dark10: #{lighten(var(--kiba-color-#{$name}), 10%)};
+      --kiba-color-#{$name}-dark20: #{lighten(var(--kiba-color-#{$name}), 20%)};
+      --kiba-color-#{$name}-dark25: #{lighten(var(--kiba-color-#{$name}), 25%)};
+      --kiba-color-#{$name}-dark50: #{lighten(var(--kiba-color-#{$name}), 50%)};
+      --kiba-color-#{$name}-dark75: #{lighten(var(--kiba-color-#{$name}), 75%)};
+      --kiba-color-#{$name}-dark80: #{lighten(var(--kiba-color-#{$name}), 80%)};
+      --kiba-color-#{$name}-dark90: #{lighten(var(--kiba-color-#{$name}), 90%)};
+      --kiba-color-#{$name}-dark95: #{lighten(var(--kiba-color-#{$name}), 95%)};
+      --kiba-color-#{$name}-dark99: #{lighten(var(--kiba-color-#{$name}), 99%)};
+    }
+  }
+}
