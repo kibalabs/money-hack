@@ -5,13 +5,13 @@ import { IRoute, MockStorage, Router, SubRouter, useFavicon, useInitialization }
 import { KibaApp } from '@kibalabs/ui-react';
 import { ToastContainer, useToastManager } from '@kibalabs/ui-react-toast';
 import { Web3AccountControlProvider, web3Initialize } from '@kibalabs/web3-react';
-import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 
 import './theme.scss';
+import { AuthProvider } from './AuthContext';
 import { ContainingView } from './components/ContainingView';
 import { GlobalsProvider, IGlobals } from './GlobalsContext';
 import { PageDataProvider } from './PageDataContext';
-import { HomePage } from './pages/HomePage';
+import { AgentPage, HomePage } from './pages';
 import { getIsNextVersion, usePrefersDarkMode } from './util';
 
 declare global {
@@ -48,10 +48,10 @@ const sessionStorageClient = new LocalStorageClient(typeof window !== 'undefined
 web3Initialize({
   reownConfig: {
     projectId: '0598a4ef2b432d9fc33d4a8756ac4e10',
-    name: 'Yield Seeker',
-    description: 'Yield Seeker — Grow your wealth on auto-pilot',
-    url: typeof window !== 'undefined' ? window.location.origin : 'https://app.yieldseeker.xyz',
-    icons: ['https://app.yieldseeker.xyz/assets/icon-dark.png'],
+    name: 'Money Hack',
+    description: 'Money Hack — AI-powered wealth management',
+    url: typeof window !== 'undefined' ? window.location.origin : 'https://app.money-hack.xyz',
+    icons: ['https://app.money-hack.xyz/assets/icon-dark.png'],
   },
 });
 
@@ -63,6 +63,7 @@ const globals: IGlobals = {
 };
 
 const routes: IRoute<IGlobals>[] = [
+  { path: '/agent', page: AgentPage },
   { path: '/', page: HomePage },
 ];
 
@@ -80,13 +81,13 @@ export function App(props: IAppProps): React.ReactElement {
   useFavicon(faviconUrl);
 
   const isInitialized = useInitialization((): void => {
-    if (typeof window !== 'undefined') {
-      // try {
-      //   Clarity.init('skc2ocvzdn');
-      // } catch (error: unknown) {
-      //   console.error('Failed to initialize Clarity:', error);
-      // }
-    }
+    // if (typeof window !== 'undefined') {
+    //   try {
+    //     Clarity.init('skc2ocvzdn');
+    //   } catch (error: unknown) {
+    //     console.error('Failed to initialize Clarity:', error);
+    //   }
+    // }
   });
 
   const onWeb3AccountError = React.useCallback((error: Error): void => {
@@ -100,17 +101,17 @@ export function App(props: IAppProps): React.ReactElement {
           {/* <QueryClientProvider client={queryClient}> */}
           <Router staticPath={props.staticPath}>
             <Web3AccountControlProvider localStorageClient={localStorageClient} onError={onWeb3AccountError}>
-              {/* <AuthProvider> */}
-              {isInitialized && (
-                <ContainingView>
-                  <SubRouter routes={routes} />
-                </ContainingView>
-              )}
-              {/* </AuthProvider> */}
-              <ToastContainer />
+              <AuthProvider>
+                {isInitialized && (
+                  <ContainingView>
+                    <SubRouter routes={routes} />
+                  </ContainingView>
+                )}
+                <ToastContainer />
+              </AuthProvider>
             </Web3AccountControlProvider>
           </Router>
-          <ReactQueryDevtools initialIsOpen={false} />
+          {/* <ReactQueryDevtools initialIsOpen={false} /> */}
           {/* </QueryClientProvider> */}
         </GlobalsProvider>
       </PageDataProvider>
