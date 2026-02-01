@@ -66,7 +66,8 @@ ORACLE_ABI: ABI = [
         'anonymous': False,
         'inputs': [
             {'indexed': True, 'internalType': 'address', 'name': 'vault', 'type': 'address'},
-            {'indexed': False, 'internalType': 'uint256', 'name': 'sharePrice', 'type': 'uint256'},
+            {'indexed': False, 'internalType': 'uint256', 'name': 'price', 'type': 'uint256'},
+            {'indexed': False, 'internalType': 'uint64', 'name': 'timestamp', 'type': 'uint64'},
         ],
         'name': 'SharePriceUpdated',
         'type': 'event',

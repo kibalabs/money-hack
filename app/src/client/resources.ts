@@ -119,3 +119,37 @@ export class MarketData {
     );
   };
 }
+
+export class AssetBalance {
+  public constructor(
+    readonly assetAddress: string,
+    readonly assetSymbol: string,
+    readonly assetDecimals: number,
+    readonly balance: bigint,
+    readonly balanceUsd: number,
+  ) { }
+
+  public static fromObject = (obj: RawObject): AssetBalance => {
+    return new AssetBalance(
+      String(obj.asset_address),
+      String(obj.asset_symbol),
+      Number(obj.asset_decimals),
+      BigInt(obj.balance as string),
+      Number(obj.balance_usd),
+    );
+  };
+}
+
+export class Wallet {
+  public constructor(
+    readonly walletAddress: string,
+    readonly assetBalances: AssetBalance[],
+  ) { }
+
+  public static fromObject = (obj: RawObject): Wallet => {
+    return new Wallet(
+      String(obj.wallet_address),
+      (obj.asset_balances as RawObject[]).map(AssetBalance.fromObject),
+    );
+  };
+}

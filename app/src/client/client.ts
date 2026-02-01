@@ -78,4 +78,12 @@ export class MoneyHackClient extends ServiceClient {
     const response = await this.makeRequest(method, path, request, Endpoints.GetMarketDataResponse, this.getHeaders(null));
     return response.marketData;
   };
+
+  public getWallet = async (walletAddress: string, authToken: string): Promise<Resources.Wallet> => {
+    const method = RestMethod.GET;
+    const path = `v1/wallets/${walletAddress}`;
+    const request = new Endpoints.GetWalletRequest();
+    const response = await this.makeRequest(method, path, request, Endpoints.GetWalletResponse, this.getHeaders(authToken));
+    return response.wallet;
+  };
 }

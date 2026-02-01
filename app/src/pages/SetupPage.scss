@@ -11,7 +11,7 @@
   font-family: inherit;
   text-align: left;
 
-  &:hover {
+  &:hover:not(.disabled) {
     border-color: var(--kiba-color-brand-primary-clear50);
     background-color: var(--kiba-color-brand-primary-clear90);
   }
@@ -20,6 +20,11 @@
     border-color: var(--kiba-color-brand-primary);
     border-width: 2px;
     background-color: var(--kiba-color-brand-primary-clear90);
+  }
+
+  &.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 }
 

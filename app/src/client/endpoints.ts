@@ -216,3 +216,27 @@ export class GetMarketDataResponse extends ResponseData {
     );
   };
 }
+
+export class GetWalletRequest extends RequestData {
+  public constructor() {
+    super();
+  }
+
+  public toObject = (): RawObject => {
+    return {};
+  };
+}
+
+export class GetWalletResponse extends ResponseData {
+  public constructor(
+    readonly wallet: Resources.Wallet,
+  ) {
+    super();
+  }
+
+  public static fromObject = (obj: RawObject): GetWalletResponse => {
+    return new GetWalletResponse(
+      Resources.Wallet.fromObject(obj.wallet as RawObject),
+    );
+  };
+}

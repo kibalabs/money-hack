@@ -5,7 +5,7 @@ import { Alignment, Box, Button, Direction, Image, InputType, KibaIcon, PaddingS
 import { useToastManager } from '@kibalabs/ui-react-toast';
 
 import { useAuth } from '../AuthContext';
-import { CollateralAsset, CollateralMarketData, MarketData } from '../client/resources';
+import { AssetBalance, CollateralAsset, CollateralMarketData, MarketData, Wallet } from '../client/resources';
 import { useGlobals } from '../GlobalsContext';
 
 import './SetupPage.scss';
@@ -30,6 +30,7 @@ export function SetupPage(): React.ReactElement {
   const [depositAmount, setDepositAmount] = React.useState<string>('');
   const [collaterals, setCollaterals] = React.useState<CollateralAsset[]>([]);
   const [marketData, setMarketData] = React.useState<MarketData | null>(null);
+  const [wallet, setWallet] = React.useState<Wallet | null>(null);
   const [isLoading, setIsLoading] = React.useState<boolean>(false);
   const [isLoadingCollaterals, setIsLoadingCollaterals] = React.useState<boolean>(true);
 
@@ -44,14 +45,20 @@ export function SetupPage(): React.ReactElement {
       if (!accountAddress || !authToken) return;
       try {
         setIsLoadingCollaterals(true);
-        const [supportedCollaterals, fetchedMarketData] = await Promise.all([
+        const [supportedCollaterals, fetchedMarketData, fetchedWallet] = await Promise.all([
           moneyHackClient.getSupportedCollaterals(authToken),
           moneyHackClient.getMarketData(),
+          moneyHackClient.getWallet(accountAddress, authToken),
         ]);
         setCollaterals(supportedCollaterals);
         setMarketData(fetchedMarketData);
-        if (supportedCollaterals.length > 0) {
-          setSelectedCollateral(supportedCollaterals[0]);
+        setWallet(fetchedWallet);
+        const firstWithBalance = supportedCollaterals.find((collateral) => {
+          const balance = fetchedWallet.assetBalances.find((b) => b.tokenAddress.toLowerCase() === collateral.address.toLowerCase());
+          return balance && balance.balance > 0n;
+        });
+        if (firstWithBalance) {
+          setSelectedCollateral(firstWithBalance);
         }
       } catch (error) {
         console.error('Failed to load collaterals:', error);
@@ -67,6 +74,31 @@ export function SetupPage(): React.ReactElement {
     if (!marketData) return null;
     return marketData.collateralMarkets.find((m) => m.collateralAddress.toLowerCase() === collateralAddress.toLowerCase()) ?? null;
   }, [marketData]);
+
+  const getAssetBalance = React.useCallback((collateralAddress: string): AssetBalance | null => {
+    if (!wallet) return null;
+    return wallet.assetBalances.find((ab) => ab.assetAddress.toLowerCase() === collateralAddress.toLowerCase()) ?? null;
+  }, [wallet]);
+
+  const formatBalance = React.useCallback((balance: bigint, decimals: number): string => {
+    const balanceNum = Number(balance) / (10 ** decimals);
+    if (balanceNum === 0) return '0';
+    if (balanceNum < 0.0001) return '<0.0001';
+    if (balanceNum < 1) return balanceNum.toFixed(4);
+    if (balanceNum < 1000) return balanceNum.toFixed(4);
+    return balanceNum.toLocaleString('en-US', { maximumFractionDigits: 2 });
+  }, []);
+
+  const selectedCollateralBalance = React.useMemo((): AssetBalance | null => {
+    if (!selectedCollateral) return null;
+    return getAssetBalance(selectedCollateral.address);
+  }, [selectedCollateral, getAssetBalance]);
+
+  const handleMaxClicked = React.useCallback((): void => {
+    if (!selectedCollateralBalance || !selectedCollateral) return;
+    const balanceNum = Number(selectedCollateralBalance.balance) / (10 ** selectedCollateral.decimals);
+    setDepositAmount(balanceNum.toString());
+  }, [selectedCollateralBalance, selectedCollateral]);
 
   const handleCollateralNext = React.useCallback((): void => {
     if (!selectedCollateral) {
@@ -176,12 +208,16 @@ export function SetupPage(): React.ReactElement {
             <Stack direction={Direction.Vertical} shouldAddGutters={true} isFullWidth={true}>
               {collaterals.map((collateral: CollateralAsset): React.ReactElement => {
                 const collateralMarket = getCollateralMarketData(collateral.address);
+                const assetBalance = getAssetBalance(collateral.address);
+                const hasBalance = assetBalance && assetBalance.balance > 0n;
+                const isDisabled = !hasBalance;
                 return (
                   <button
                     key={collateral.address}
                     type='button'
-                    className={`selectionCard ${selectedCollateral?.address === collateral.address ? 'selected' : ''}`}
-                    onClick={(): void => setSelectedCollateral(collateral)}
+                    className={`selectionCard ${selectedCollateral?.address === collateral.address ? 'selected' : ''} ${isDisabled ? 'disabled' : ''}`}
+                    onClick={(): void => { if (!isDisabled) setSelectedCollateral(collateral); }}
+                    disabled={isDisabled}
                   >
                     <Stack direction={Direction.Horizontal} childAlignment={Alignment.Center} contentAlignment={Alignment.Start} shouldAddGutters={true} isFullWidth={true}>
                       {collateral.logoUri && (
@@ -191,11 +227,16 @@ export function SetupPage(): React.ReactElement {
                       )}
                       <Stack direction={Direction.Vertical} childAlignment={Alignment.Start}>
                         <Text variant='bold'>{collateral.symbol}</Text>
-                        <Text variant='note'>
-                          {collateralMarket
-                            ? `Borrow: ${(collateralMarket.borrowApy * 100).toFixed(2)}% • Max LTV: ${(collateralMarket.maxLtv * 100).toFixed(0)}%`
-                            : collateral.name}
-                        </Text>
+                        {hasBalance ? (
+                          <Text variant='note'>{`Balance: ${formatBalance(assetBalance.balance, collateral.decimals)}`}</Text>
+                        ) : (
+                          <Text variant='note'>No balance</Text>
+                        )}
+                        {collateralMarket && (
+                          <Text variant='note'>
+                            {`Borrow: ${(collateralMarket.borrowApy * 100).toFixed(2)}% • Max LTV: ${(collateralMarket.maxLtv * 100).toFixed(0)}%`}
+                          </Text>
+                        )}
                       </Stack>
                       <Stack.Item growthFactor={1} shrinkFactor={1} />
                       {selectedCollateral?.address === collateral.address && (
@@ -280,6 +321,17 @@ export function SetupPage(): React.ReactElement {
               </Box>
             )}
             <Text variant='bold'>{selectedCollateral.symbol}</Text>
+            <Stack.Item growthFactor={1} shrinkFactor={1} />
+            {selectedCollateralBalance && (
+              <Stack direction={Direction.Horizontal} childAlignment={Alignment.Center} shouldAddGutters={true}>
+                <Text variant='note'>
+                  Balance:
+                  {' '}
+                  {formatBalance(selectedCollateralBalance.balance, selectedCollateral.decimals)}
+                </Text>
+                <Button variant='tertiary-small' text='Max' onClicked={handleMaxClicked} isEnabled={selectedCollateralBalance.balance > 0n} />
+              </Stack>
+            )}
           </Stack>
           <SingleLineInput
             inputType={InputType.Number}

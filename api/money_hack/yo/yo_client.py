@@ -16,7 +16,6 @@ from money_hack.yo import yo_abis
 VAULT_ADDRESS_MAP: dict[int, str] = {
     constants.BASE_CHAIN_ID: '0x0000000f2eB9f69274678c76222B35eEc7588a65',
 }
-FALLBACK_APY = 0.08
 
 
 class YoVaultInfo(BaseModel):
@@ -51,7 +50,9 @@ class YoClient:
         latestBlock = await self.ethClient.get_latest_block_number()
         maxLookbackBlocks = int((3 * 24 * constants.SECONDS_PER_HOUR) / constants.BASE_BLOCK_TIME_SECONDS)
         fromBlock = max(latestBlock - maxLookbackBlocks, 0)
+        logging.info(f'Fetching SharePriceUpdated logs from oracle {oracleAddress}, topic0={sharePriceUpdatedTopic}, topic1={vaultAddressTopic}, blocks {fromBlock}-{latestBlock}')
         logs = await self.blockscoutClient.get_logs_by_topic(chainId=chainId, address=oracleAddress, topic0=sharePriceUpdatedTopic, topic1=vaultAddressTopic, fromBlock=fromBlock, toBlock=latestBlock)
+        logging.info(f'Found {len(logs)} SharePriceUpdated logs')
         updateBlocks = sorted((int(str(log.blockNumber), 16) for log in logs), reverse=True)
         return updateBlocks[:numUpdates]
 
@@ -59,8 +60,7 @@ class YoClient:
         minUpdates = 2
         updateBlocks = await self._get_share_price_update_blocks(chainId=chainId, vaultAddress=vaultAddress, numUpdates=minUpdates)
         if len(updateBlocks) < minUpdates:
-            logging.info(f'Not enough share price updates for {vaultAddress}, returning fallback APY')
-            return FALLBACK_APY
+            raise ValueError(f'Not enough share price updates for {vaultAddress}: found {len(updateBlocks)}, need {minUpdates}')
         block1 = int(updateBlocks[1])
         block2 = int(updateBlocks[0])
         rate1Response, rate2Response, blockData1, blockData2 = await asyncio.gather(
@@ -74,10 +74,10 @@ class YoClient:
         timestamp1 = int(blockData1['timestamp'])
         timestamp2 = int(blockData2['timestamp'])
         if rate1 <= 0 or rate2 <= rate1:
-            return FALLBACK_APY
+            raise ValueError(f'Invalid share price data for {vaultAddress}: rate1={rate1}, rate2={rate2}')
         secondsElapsed = timestamp2 - timestamp1
         if secondsElapsed <= 0:
-            return FALLBACK_APY
+            raise ValueError(f'Invalid timestamps for {vaultAddress}: t1={timestamp1}, t2={timestamp2}')
         rateChange = rate2 / rate1
         apy = float((rateChange) ** (constants.SECONDS_PER_YEAR / secondsElapsed)) - 1
         logging.info(f'Yo vault {vaultAddress}: Calculated APY from share price updates. Rate change: {rateChange:.6f}, Time: {secondsElapsed}s, APY: {apy:.4%}')

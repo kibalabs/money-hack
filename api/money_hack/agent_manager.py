@@ -15,11 +15,13 @@ from siwe import SiweMessage  # type: ignore[import-untyped]
 from web3 import Web3
 
 from money_hack.api.authorizer import Authorizer
+from money_hack.api.v1_resources import AssetBalance
 from money_hack.api.v1_resources import AuthToken
 from money_hack.api.v1_resources import CollateralAsset
 from money_hack.api.v1_resources import CollateralMarketData
 from money_hack.api.v1_resources import Position
 from money_hack.api.v1_resources import UserConfig
+from money_hack.api.v1_resources import Wallet
 from money_hack.blockchain_data.alchemy_client import AlchemyClient
 from money_hack.blockchain_data.moralis_client import MoralisClient
 from money_hack.morpho.morpho_client import MorphoClient
@@ -39,7 +41,6 @@ ERC1271_ABI: ABI = [
 SUPPORTED_COLLATERALS = [
     CollateralAsset(chain_id=8453, address='0x4200000000000000000000000000000000000006', symbol='WETH', name='Wrapped Ether', decimals=18, logo_uri='https://assets.coingecko.com/coins/images/2518/small/weth.png'),
     CollateralAsset(chain_id=8453, address='0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf', symbol='cbBTC', name='Coinbase Wrapped BTC', decimals=8, logo_uri='https://assets.coingecko.com/coins/images/40143/standard/cbbtc.webp'),
-    CollateralAsset(chain_id=8453, address='0x0555E30da8f98308EdB960aa94C0Db47230d2B9c', symbol='WBTC', name='Wrapped BTC', decimals=8, logo_uri='https://assets.coingecko.com/coins/images/7598/small/wrapped_bitcoin_wbtc.png'),
 ]
 
 YO_VAULT_ADDRESS = '0x0000000f2eB9f69274678c76222B35eEc7588a65'
@@ -167,29 +168,20 @@ class AgentManager(Authorizer):
                 collateral_address=collateral.address,
                 loan_address=None,
             )
-            if market is not None:
-                collateralMarkets.append(
-                    CollateralMarketData(
-                        collateral_address=collateral.address,
-                        collateral_symbol=collateral.symbol,
-                        borrow_apy=market.borrow_apy,
-                        max_ltv=market.lltv,
-                        market_id=market.unique_key,
-                    )
+            if market is None:
+                raise ValueError(f'No Morpho market found for collateral {collateral.symbol} ({collateral.address})')
+            collateralMarkets.append(
+                CollateralMarketData(
+                    collateral_address=collateral.address,
+                    collateral_symbol=collateral.symbol,
+                    borrow_apy=market.borrow_apy,
+                    max_ltv=market.lltv,
+                    market_id=market.unique_key,
                 )
-            else:
-                collateralMarkets.append(
-                    CollateralMarketData(
-                        collateral_address=collateral.address,
-                        collateral_symbol=collateral.symbol,
-                        borrow_apy=0.03,
-                        max_ltv=0.86,
-                        market_id=None,
-                    )
-                )
+            )
         yieldApy = await self.yoClient.get_yield_apy(chainId=self.chainId)
         if yieldApy is None:
-            yieldApy = 0.08
+            raise ValueError('Failed to get Yo.xyz yield APY')
         return collateralMarkets, yieldApy, YO_VAULT_ADDRESS, YO_VAULT_NAME
 
     async def withdraw_usdc(self, user_address: str, amount: str) -> tuple[Position, str]:
@@ -197,3 +189,31 @@ class AgentManager(Authorizer):
 
     async def close_position(self, user_address: str) -> str:  # noqa: ARG002
         return '0x' + '0' * 64
+
+    async def get_wallet(self, wallet_address: str) -> Wallet:
+        walletAddress = chain_util.normalize_address(wallet_address)
+        clientAssetBalances = await self.moralisClient.get_wallet_asset_balances(chainId=self.chainId, walletAddress=walletAddress)
+        supportedAddresses = {c.address.lower() for c in SUPPORTED_COLLATERALS}
+        assetBalances: list[AssetBalance] = []
+        for clientBalance in clientAssetBalances:
+            if clientBalance.assetAddress.lower() not in supportedAddresses:
+                continue
+            collateral = next((c for c in SUPPORTED_COLLATERALS if c.address.lower() == clientBalance.assetAddress.lower()), None)
+            if collateral is None:
+                continue
+            try:
+                priceUsd = await self._get_asset_price(assetAddress=clientBalance.assetAddress)
+                balanceHuman = clientBalance.balance / (10**collateral.decimals)
+                balanceUsd = balanceHuman * priceUsd
+            except Exception:  # noqa: BLE001
+                balanceUsd = 0.0
+            assetBalances.append(
+                AssetBalance(
+                    asset_address=clientBalance.assetAddress,
+                    asset_symbol=collateral.symbol,
+                    asset_decimals=collateral.decimals,
+                    balance=str(clientBalance.balance),
+                    balance_usd=balanceUsd,
+                )
+            )
+        return Wallet(wallet_address=walletAddress, asset_balances=assetBalances)

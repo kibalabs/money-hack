@@ -103,3 +103,20 @@ class MarketDataResponse(BaseModel):
     yield_apy: float
     yield_vault_address: str
     yield_vault_name: str
+
+
+class AssetBalance(BaseModel):
+    asset_address: str
+    asset_symbol: str
+    asset_decimals: int
+    balance: str
+    balance_usd: float
+
+
+class Wallet(BaseModel):
+    wallet_address: str
+    asset_balances: list[AssetBalance]
+
+
+class GetWalletResponse(BaseModel):
+    wallet: Wallet
