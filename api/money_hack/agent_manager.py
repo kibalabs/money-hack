@@ -2,6 +2,7 @@ import base64
 from datetime import UTC
 from datetime import datetime
 
+from core import logging
 from core.exceptions import UnauthorizedException
 from core.requester import Requester
 from core.util import chain_util
@@ -18,6 +19,8 @@ from money_hack.api.v1_resources import AuthToken
 from money_hack.api.v1_resources import CollateralAsset
 from money_hack.api.v1_resources import Position
 from money_hack.api.v1_resources import UserConfig
+from money_hack.blockchain_data.alchemy_client import AlchemyClient
+from money_hack.blockchain_data.moralis_client import MoralisClient
 
 w3 = Web3()
 
@@ -43,11 +46,29 @@ class AgentManager(Authorizer):
         requester: Requester,
         chainId: int,
         ethClient: RestEthClient,
+        moralisClient: MoralisClient,
+        alchemyClient: AlchemyClient,
     ) -> None:
         self.chainId = chainId
         self.requester = requester
         self.ethClient = ethClient
+        self.moralisClient = moralisClient
+        self.alchemyClient = alchemyClient
         self._signatureSignerMap: dict[str, str] = {}
+
+    async def _get_asset_price(self, assetAddress: str) -> float:
+        """Get the current USD price for an asset. Tries Alchemy first, falls back to Moralis."""
+        try:
+            priceData = await self.alchemyClient.get_asset_current_price(chainId=self.chainId, assetAddress=assetAddress)
+            return priceData.priceUsd
+        except Exception as e:
+            logging.warning(f'Alchemy price fetch failed for {assetAddress}, trying Moralis: {e}')
+            try:
+                priceData = await self.moralisClient.get_asset_current_price(chainId=self.chainId, assetAddress=assetAddress)
+                return priceData.priceUsd
+            except Exception as e2:
+                logging.error(f'Both Alchemy and Moralis price fetch failed for {assetAddress}: {e2}')
+                raise
 
     async def _retrieve_signature_signer_address(self, signatureString: str) -> str:
         if signatureString in self._signatureSignerMap:
@@ -91,7 +112,19 @@ class AgentManager(Authorizer):
 
     async def create_position(self, user_address: str, collateral_asset_address: str, collateral_amount: str, target_ltv: float) -> Position:
         collateral = next((c for c in SUPPORTED_COLLATERALS if c.address.lower() == collateral_asset_address.lower()), SUPPORTED_COLLATERALS[0])
-        collateral_value = 100000.0
+
+        # Get real price for the collateral asset
+        try:
+            price_usd = await self._get_asset_price(assetAddress=collateral_asset_address)
+            # Convert collateral_amount (raw) to human readable using decimals
+            collateral_amount_human = int(collateral_amount) / (10 ** collateral.decimals)
+            collateral_value = collateral_amount_human * price_usd
+            logging.info(f'Price for {collateral.symbol}: ${price_usd:.2f}, collateral value: ${collateral_value:.2f}')
+        except Exception as e:
+            logging.error(f'Failed to fetch price for {collateral_asset_address}, using fallback: {e}')
+            # Fallback to hardcoded value if price fetch fails
+            collateral_value = 100000.0
+
         borrow_value = collateral_value * target_ltv
         return Position(
             position_id=f'pos-{user_address[:8]}',

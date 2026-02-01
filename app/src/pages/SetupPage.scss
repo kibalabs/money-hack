@@ -1,0 +1,50 @@
+.selectionCard {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 1rem;
+  border: 1px solid var(--kiba-color-text-clear80);
+  border-radius: var(--kiba-border-radius);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background-color: transparent;
+  font-family: inherit;
+  text-align: left;
+
+  &:hover {
+    border-color: var(--kiba-color-brand-primary-clear50);
+    background-color: var(--kiba-color-brand-primary-clear90);
+  }
+
+  &.selected {
+    border-color: var(--kiba-color-brand-primary);
+    border-width: 2px;
+    background-color: var(--kiba-color-brand-primary-clear90);
+  }
+}
+
+.ltvCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--kiba-color-text-clear80);
+  border-radius: var(--kiba-border-radius);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background-color: transparent;
+  font-family: inherit;
+  text-align: left;
+
+  &:hover {
+    border-color: var(--kiba-color-brand-primary-clear50);
+    background-color: var(--kiba-color-brand-primary-clear90);
+  }
+
+  &.selected {
+    border-color: var(--kiba-color-brand-primary);
+    border-width: 2px;
+    background-color: var(--kiba-color-brand-primary-clear90);
+  }
+}

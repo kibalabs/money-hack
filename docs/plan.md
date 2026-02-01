@@ -1,5 +1,86 @@
 # BorrowBot: Automated Overcollateralized Lending Agent on Base
 
+## Implementation Status
+
+### ✅ Completed
+
+#### Frontend (app/)
+- **Wallet Connection**: Full WalletConnect/Base wallet integration with SIWE login
+- **Setup Screen (4-step wizard)**:
+  - Step 1: Collateral selection (WETH, WBTC, cbBTC) with logos
+  - Step 2: Target LTV selection (65%, 70%, 75%, 80%)
+  - Step 3: Deposit amount with summary preview (collateral, LTV, estimated borrow, APY)
+  - Step 4: Telegram connection (required - explains why notifications are needed for autonomous agent)
+- **Auth Context**: Proper signature-based auth token generation (base64 encoded SIWE message + signature)
+- **API Client**: `MoneyHackClient` with typed endpoints for all position operations
+- **Navigation Flow**: HomePage → (login) → SetupPage → (create position) → AgentPage
+
+#### Backend (api/)
+- **API Endpoints** (v1_api.py):
+  - `GET /v1/collaterals` - List supported collateral assets
+  - `GET /v1/users/{address}/config` - Get user preferences
+  - `POST /v1/users/{address}/config` - Update telegram handle & preferred LTV
+  - `GET /v1/users/{address}/position` - Get current position
+  - `POST /v1/users/{address}/position` - Create new position
+  - `POST /v1/users/{address}/position/withdraw` - Withdraw USDC
+  - `POST /v1/users/{address}/position/close` - Close position
+- **Signature Validation**: Full SIWE + ERC-1271 smart wallet signature verification
+- **Resource Models**: CollateralAsset, Position, UserConfig with Pydantic
+- **Price Feeds**: Real-time collateral price fetching via Alchemy/Moralis APIs (copied from agent-hack)
+- **Position Creation**: Uses real prices to calculate collateral USD value
+
+### 🔲 Not Yet Implemented
+
+#### Frontend
+- **Dashboard Screen**: Real-time position display (collateral value, borrow amount, LTV, health factor, vault balance, yield)
+- **Withdrawal Modal**: USDC withdrawal with projected LTV warnings
+- **Unwind Position**: Full position close UI
+- **Notifications Page**: Telegram setup confirmation and alert history
+
+#### Backend - Onchain Integration
+- **Morpho Integration**: Actual supply/borrow calls to Morpho protocol
+- **Gauntlet Vault Integration**: Deposit/withdraw USDC to yield vault
+- **Li.Fi Batching**: Multi-step transaction composition
+- **ENS Storage**: Storing user preferences (telegram_handle, preferred_ltv) onchain
+
+#### Backend - Data Persistence
+- **In-Memory Position Storage**: Currently positions are not persisted between server restarts
+- **Database Integration**: For production, need proper persistence layer
+
+#### Background Operations
+- **LTV Monitoring Worker**: Periodic position health checks (every 5-10 min)
+- **Auto-Rebalancing**: Automatic repay when LTV exceeds threshold
+- **Auto-Borrow**: Borrow more when LTV drops below target (if profitable)
+- **Profitability Checks**: Compare yield APY vs borrow APR before actions
+
+#### Notifications
+- **Telegram Bot Integration**: Proper bot setup like agent-hack (see reference implementation below)
+- **Alert Types**: Position opened, LTV adjustment, critical warnings, close confirmation
+
+#### Smart Contracts
+- **AgentWalletKit Integration**: ERC-4337 agent wallet creation
+- **Adapter Registry**: Restrict actions to approved protocols only
+
+---
+
+## Implementation Notes
+
+### Telegram Integration TODO
+The current implementation only collects the user's Telegram handle as text input. For production, we need to implement proper Telegram bot integration similar to agent-hack:
+
+1. **Create Telegram Bot** via BotFather
+2. **Implement OAuth-style flow**: User clicks "Connect Telegram" → Opens Telegram → Authenticates with bot → Bot sends verification code or deep-links back
+3. **Store chat_id**: The bot needs the user's Telegram chat_id (not just username) to send messages
+4. **Backend integration**:
+   - API endpoint to initiate Telegram connection
+   - Webhook or polling to receive Telegram updates
+   - Store mapping: wallet_address → telegram_chat_id
+5. **Send notifications**: Use Telegram Bot API to send formatted messages for position updates, alerts, etc.
+
+Reference: See agent-hack's Telegram integration for implementation patterns.
+
+---
+
 ## Executive Summary
 BorrowBot is an MVP onchain agent built with AgentWalletKit that enables users to deposit collateral (WETH, WBTC, or cbBTC) on Base, secure an overcollateralized USDC loan via Morpho, and earn ~7-10% yield by depositing the borrowed USDC into the Gauntlet USD Alpha vault. The agent autonomously monitors and adjusts the loan's LTV ratio for safety and profitability, sending Telegram notifications for updates and urgent actions. Users can withdraw USDC partially or fully, with safeguards to maintain position health. All actions are batched via Li.Fi for efficiency, with ENS storing user preferences and optional Uniswap v4 swaps. This demo-focused project emphasizes reliability, transparency, and composability for the ETHGlobal HackMoney 2026 hackathon, targeting Uniswap, Li.Fi, and ENS prize categories.
 

@@ -25,7 +25,7 @@ declare global {
 
 const requester = new Requester();
 const apiRequester = new Requester();
-const baseUrl = typeof window !== 'undefined' && window.KRT_API_URL ? window.KRT_API_URL : 'https://api.money-hack.xyz';
+const baseUrl = typeof window !== 'undefined' && window.KRT_API_URL ? window.KRT_API_URL : 'https://borrowbot-api.kibalabs.com';
 const moneyHackClient = new MoneyHackClient(apiRequester, baseUrl);
 const localStorageClient = new LocalStorageClient(typeof window !== 'undefined' ? window.localStorage : new MockStorage());
 const sessionStorageClient = new LocalStorageClient(typeof window !== 'undefined' ? window.sessionStorage : new MockStorage());

@@ -14,12 +14,12 @@ export class CollateralAsset {
 
   public static fromObject = (obj: RawObject): CollateralAsset => {
     return new CollateralAsset(
-      Number(obj.chainId),
+      Number(obj.chain_id),
       String(obj.address),
       String(obj.symbol),
       String(obj.name),
       Number(obj.decimals),
-      obj.logoUri ? String(obj.logoUri) : null,
+      obj.logo_uri ? String(obj.logo_uri) : null,
     );
   };
 }
@@ -47,22 +47,22 @@ export class Position {
 
   public static fromObject = (obj: RawObject): Position => {
     return new Position(
-      String(obj.positionId),
-      dateFromString(String(obj.createdDate)),
-      String(obj.userAddress),
-      CollateralAsset.fromObject(obj.collateralAsset as RawObject),
-      BigInt(obj.collateralAmount as string),
-      Number(obj.collateralValueUsd),
-      BigInt(obj.borrowAmount as string),
-      Number(obj.borrowValueUsd),
-      Number(obj.currentLtv),
-      Number(obj.targetLtv),
-      Number(obj.healthFactor),
-      BigInt(obj.vaultBalance as string),
-      Number(obj.vaultBalanceUsd),
-      BigInt(obj.accruedYield as string),
-      Number(obj.accruedYieldUsd),
-      Number(obj.estimatedApy),
+      String(obj.position_id),
+      dateFromString(String(obj.created_date)),
+      String(obj.user_address),
+      CollateralAsset.fromObject(obj.collateral_asset as RawObject),
+      BigInt(obj.collateral_amount as string),
+      Number(obj.collateral_value_usd),
+      BigInt(obj.borrow_amount as string),
+      Number(obj.borrow_value_usd),
+      Number(obj.current_ltv),
+      Number(obj.target_ltv),
+      Number(obj.health_factor),
+      BigInt(obj.vault_balance as string),
+      Number(obj.vault_balance_usd),
+      BigInt(obj.accrued_yield as string),
+      Number(obj.accrued_yield_usd),
+      Number(obj.estimated_apy),
       String(obj.status),
     );
   };
@@ -76,8 +76,8 @@ export class UserConfig {
 
   public static fromObject = (obj: RawObject): UserConfig => {
     return new UserConfig(
-      obj.telegramHandle ? String(obj.telegramHandle) : null,
-      Number(obj.preferredLtv),
+      obj.telegram_handle ? String(obj.telegram_handle) : null,
+      Number(obj.preferred_ltv),
     );
   };
 }
