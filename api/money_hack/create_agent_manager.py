@@ -1,27 +1,20 @@
+import os
+
 from core.requester import Requester
+from core.web3.eth_client import RestEthClient
 
 from money_hack.agent_manager import AgentManager
 
-# DB_HOST = os.environ['DB_HOST']
-# DB_PORT = os.environ['DB_PORT']
-# DB_NAME = os.environ['DB_NAME']
-# DB_USERNAME = os.environ['DB_USERNAME']
-# DB_PASSWORD = os.environ['DB_PASSWORD']
+BASE_CHAIN_ID = 8453
+BASE_RPC_URL = os.environ.get('BASE_RPC_URL', 'https://mainnet.base.org')
 
 
 def create_agent_manager() -> AgentManager:
-    # database = Database(
-    #     connectionString=Database.create_psql_connection_string(
-    #         host=DB_HOST,
-    #         port=DB_PORT,
-    #         name=DB_NAME,
-    #         username=DB_USERNAME,
-    #         password=DB_PASSWORD,
-    #     )
-    # )
     requester = Requester()
+    ethClient = RestEthClient(url=BASE_RPC_URL, chainId=BASE_CHAIN_ID, requester=requester)
     agentManager = AgentManager(
         requester=requester,
-        chainId=8453,
+        chainId=BASE_CHAIN_ID,
+        ethClient=ethClient,
     )
     return agentManager

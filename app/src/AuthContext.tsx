@@ -8,6 +8,7 @@ interface AuthContextType {
   isWeb3AccountConnected: boolean;
   isWeb3AccountLoggedIn: boolean;
   accountAddress: string | undefined;
+  authToken: string | null;
   chainId: number;
   logout: () => void;
 }
@@ -30,6 +31,13 @@ export function AuthProvider(props: AuthProviderProps): React.ReactElement {
   const isWeb3AccountConnected = account != null;
   const isWeb3AccountLoggedIn = account != null && loginSignature != null;
 
+  const authToken = React.useMemo((): string | null => {
+    if (!loginSignature) {
+      return null;
+    }
+    return btoa(JSON.stringify(loginSignature));
+  }, [loginSignature]);
+
   const logout = React.useCallback((): void => {
     if (typeof window !== 'undefined') {
       localStorage.clear();
@@ -43,6 +51,7 @@ export function AuthProvider(props: AuthProviderProps): React.ReactElement {
     isWeb3AccountConnected,
     isWeb3AccountLoggedIn,
     accountAddress,
+    authToken,
     chainId: chainId || 8453,
     logout,
   }), [
@@ -50,6 +59,7 @@ export function AuthProvider(props: AuthProviderProps): React.ReactElement {
     isWeb3AccountConnected,
     isWeb3AccountLoggedIn,
     accountAddress,
+    authToken,
     chainId,
     logout,
   ]);

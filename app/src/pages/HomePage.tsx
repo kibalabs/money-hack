@@ -139,7 +139,7 @@ function ProviderDialog(props: IProviderDialogProps): React.ReactElement {
 }
 
 export function HomePage(): React.ReactElement {
-  const { isWeb3AccountConnected, logout } = useAuth();
+  const { isWeb3AccountConnected, isWeb3AccountLoggedIn, logout } = useAuth();
   const [web3Providers, chooseEip1193Provider] = useWeb3Providers();
   const onLinkAccountsClicked = useOnLinkWeb3AccountsClicked();
   const onSignInWithBaseClicked = useWeb3OnBaseLoginClicked();
@@ -148,6 +148,12 @@ export function HomePage(): React.ReactElement {
   const isReownInitialized = useIsReownInitialized();
   const [isProviderDialogOpen, setIsProviderDialogOpen] = React.useState(false);
   const [isLoggingIn, setIsLoggingIn] = React.useState<boolean>(false);
+
+  React.useEffect(() => {
+    if (isWeb3AccountLoggedIn) {
+      window.location.href = '/setup';
+    }
+  }, [isWeb3AccountLoggedIn]);
 
   const onConnectWalletClicked = React.useCallback((): void => {
     setIsProviderDialogOpen(true);

@@ -3,6 +3,15 @@ revision = 3
 requires-python = ">=3.12"
 
 [[package]]
+name = "abnf"
+version = "2.4.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e2/ad/65071d3abe27e29347e8e4cd9ba3f8c5df096ac486d4afb7ab17b29f36ad/abnf-2.4.1.tar.gz", hash = "sha256:cde0674eabdf782c0bd3a8abae625f42c80650d65be5bfd76939ba9efc3c8122", size = 322627, upload-time = "2025-12-01T00:35:36.292Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e0/2e/815384e25cdade147af784ad5a0f71fe10602c5e0a1d35a9c9040a72248b/abnf-2.4.1-py3-none-any.whl", hash = "sha256:c9918b6aa9fe93c531ab245d99b47fc2ccf56407e005a598b279f384397d1df1", size = 50039, upload-time = "2025-12-01T00:35:35.118Z" },
+]
+
+[[package]]
 name = "aiobotocore"
 version = "3.1.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1398,6 +1407,37 @@ wheels = [
 ]
 
 [[package]]
+name = "money-hack-api"
+version = "0.1.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "alembic" },
+    { name = "kiba-core", extra = ["core-api", "database-psql", "queue-sqs", "requester", "storage", "web3"] },
+    { name = "siwe" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "devtools" },
+    { name = "kiba-build" },
+    { name = "kiba-core", extra = ["types"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "alembic", specifier = "==1.15.1" },
+    { name = "kiba-core", extras = ["core-api", "database-psql", "queue-sqs", "requester", "storage", "web3"], specifier = "==0.5.3.dev44" },
+    { name = "siwe", specifier = ">=4.4.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "devtools", specifier = ">=0.12.2" },
+    { name = "kiba-build", specifier = "==0.1.11.dev9" },
+    { name = "kiba-core", extras = ["types"], specifier = "==0.5.3.dev44" },
+]
+
+[[package]]
 name = "more-itertools"
 version = "10.8.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2270,6 +2310,25 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/31/97/b8114a347aee340570eb92b1a1fe512a038766903af7aa4e28447dc25c80/simple_chalk-0.1.0.tar.gz", hash = "sha256:d80f55993dfa040c1b55d2fbfb925e4fbb5798c2934601aa448ef4a192d84196", size = 13862, upload-time = "2018-11-24T18:34:12.103Z" }
 
 [[package]]
+name = "siwe"
+version = "4.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "abnf" },
+    { name = "eth-account" },
+    { name = "eth-typing" },
+    { name = "eth-utils" },
+    { name = "pydantic" },
+    { name = "pydantic-core" },
+    { name = "typing-extensions" },
+    { name = "web3" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a0/20/53cce95942c4e7cac9020d509b88a9cf09b40443b7de8b6f44fe6e24aa26/siwe-4.4.0.tar.gz", hash = "sha256:5fdf843253a91d78085f1da11ed7c9695bbb743e112da658e63a285ddf3ffec7", size = 14258, upload-time = "2024-10-11T15:29:14.284Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/67/71/3bc6d28fe362f295593f570e93db8ec84842634efc3f55612dfab51e7748/siwe-4.4.0-py3-none-any.whl", hash = "sha256:3a4db2d36e10933c01d09ba0aad4db2f404e9ab2c9e9a204fa1bc1103e9d754d", size = 10472, upload-time = "2024-10-11T15:29:12.86Z" },
+]
+
+[[package]]
 name = "six"
 version = "1.17.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2892,33 +2951,4 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/f9/86/0f0dccb6e59a9e7f122c5afd43568b1d31b8ab7dda5f1b01fb5c7025c9a9/yarl-1.22.0-cp314-cp314t-win_amd64.whl", hash = "sha256:9fb17ea16e972c63d25d4a97f016d235c78dd2344820eb35bc034bc32012ee27", size = 96292, upload-time = "2025-10-06T14:12:15.398Z" },
     { url = "https://files.pythonhosted.org/packages/48/b7/503c98092fb3b344a179579f55814b613c1fbb1c23b3ec14a7b008a66a6e/yarl-1.22.0-cp314-cp314t-win_arm64.whl", hash = "sha256:9f6d73c1436b934e3f01df1e1b21ff765cd1d28c77dfb9ace207f746d4610ee1", size = 85171, upload-time = "2025-10-06T14:12:16.935Z" },
     { url = "https://files.pythonhosted.org/packages/73/ae/b48f95715333080afb75a4504487cbe142cae1268afc482d06692d605ae6/yarl-1.22.0-py3-none-any.whl", hash = "sha256:1380560bdba02b6b6c90de54133c81c9f2a453dee9912fe58c1dcced1edb7cff", size = 46814, upload-time = "2025-10-06T14:12:53.872Z" },
-]
-
-[[package]]
-name = "yieldseeker-api"
-version = "0.1.0"
-source = { virtual = "." }
-dependencies = [
-    { name = "alembic" },
-    { name = "kiba-core", extra = ["core-api", "database-psql", "queue-sqs", "requester", "storage", "web3"] },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "devtools" },
-    { name = "kiba-build" },
-    { name = "kiba-core", extra = ["types"] },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "alembic", specifier = "==1.15.1" },
-    { name = "kiba-core", extras = ["core-api", "database-psql", "queue-sqs", "requester", "storage", "web3"], specifier = "==0.5.3.dev44" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "devtools", specifier = ">=0.12.2" },
-    { name = "kiba-build", specifier = "==0.1.11.dev9" },
-    { name = "kiba-core", extras = ["types"], specifier = "==0.5.3.dev44" },
 ]

@@ -3,12 +3,12 @@ import React from 'react';
 import { LocalStorageClient, Requester } from '@kibalabs/core';
 import { IMultiAnyChildProps } from '@kibalabs/core-react';
 
-// import { YieldSeekerClient } from './client/client';
+import { MoneyHackClient } from './client/client';
 
 export interface IGlobals {
   localStorageClient: LocalStorageClient;
   requester: Requester;
-  // yieldSeekerClient: YieldSeekerClient;
+  moneyHackClient: MoneyHackClient;
   sessionStorageClient: LocalStorageClient;
 }
 

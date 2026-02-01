@@ -8,10 +8,11 @@ import { Web3AccountControlProvider, web3Initialize } from '@kibalabs/web3-react
 
 import './theme.scss';
 import { AuthProvider } from './AuthContext';
+import { MoneyHackClient } from './client/client';
 import { ContainingView } from './components/ContainingView';
 import { GlobalsProvider, IGlobals } from './GlobalsContext';
 import { PageDataProvider } from './PageDataContext';
-import { AgentPage, HomePage } from './pages';
+import { AgentPage, HomePage, SetupPage } from './pages';
 import { getIsNextVersion, usePrefersDarkMode } from './util';
 
 declare global {
@@ -23,9 +24,9 @@ declare global {
 }
 
 const requester = new Requester();
-// const ysRequester = new Requester();
-// const baseUrl = typeof window !== 'undefined' && window.KRT_API_URL ? window.KRT_API_URL : 'https://api.yieldseeker.xyz';
-// const yieldSeekerClient = new YieldSeekerClient(ysRequester, baseUrl);
+const apiRequester = new Requester();
+const baseUrl = typeof window !== 'undefined' && window.KRT_API_URL ? window.KRT_API_URL : 'https://api.money-hack.xyz';
+const moneyHackClient = new MoneyHackClient(apiRequester, baseUrl);
 const localStorageClient = new LocalStorageClient(typeof window !== 'undefined' ? window.localStorage : new MockStorage());
 const sessionStorageClient = new LocalStorageClient(typeof window !== 'undefined' ? window.sessionStorage : new MockStorage());
 // const queryClient = new QueryClient({
@@ -58,11 +59,12 @@ web3Initialize({
 const globals: IGlobals = {
   requester,
   localStorageClient,
-  // yieldSeekerClient,
+  moneyHackClient,
   sessionStorageClient,
 };
 
 const routes: IRoute<IGlobals>[] = [
+  { path: '/setup', page: SetupPage },
   { path: '/agent', page: AgentPage },
   { path: '/', page: HomePage },
 ];

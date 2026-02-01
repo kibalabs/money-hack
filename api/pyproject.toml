@@ -1,9 +1,10 @@
 [project]
-name = "yieldseeker-api"
+name = "money-hack-api"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
     "alembic==1.15.1",
+    "siwe>=4.4.0",
     "kiba-core[core-api,database-psql,queue-sqs,requester,storage,web3]==0.5.3.dev44",
 ]
 
