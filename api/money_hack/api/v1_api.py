@@ -56,8 +56,14 @@ def create_v1_routes(agentManager: AgentManager) -> list[Route]:
         transaction_hash = await agentManager.close_position(user_address=userAddress)
         return resources.ClosePositionResponse(transaction_hash=transaction_hash)
 
+    @json_route(requestType=resources.EmptyRequest, responseType=resources.MarketDataResponse)
+    async def get_market_data(request: KibaApiRequest[resources.EmptyRequest]) -> resources.MarketDataResponse:  # noqa: ARG001
+        collateralMarkets, yieldApy, vaultAddress, vaultName = await agentManager.get_market_data()
+        return resources.MarketDataResponse(collateral_markets=collateralMarkets, yield_apy=yieldApy, yield_vault_address=vaultAddress, yield_vault_name=vaultName)
+
     return [
         Route('/v1/collaterals', endpoint=get_supported_collaterals, methods=['GET']),
+        Route('/v1/market-data', endpoint=get_market_data, methods=['GET']),
         Route('/v1/users/{userAddress:str}/config', endpoint=get_user_config, methods=['GET']),
         Route('/v1/users/{userAddress:str}/config', endpoint=update_user_config, methods=['POST']),
         Route('/v1/users/{userAddress:str}/position', endpoint=get_position, methods=['GET']),

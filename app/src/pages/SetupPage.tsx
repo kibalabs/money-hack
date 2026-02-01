@@ -5,7 +5,7 @@ import { Alignment, Box, Button, Direction, Image, InputType, KibaIcon, PaddingS
 import { useToastManager } from '@kibalabs/ui-react-toast';
 
 import { useAuth } from '../AuthContext';
-import { CollateralAsset } from '../client/resources';
+import { CollateralAsset, CollateralMarketData, MarketData } from '../client/resources';
 import { useGlobals } from '../GlobalsContext';
 
 import './SetupPage.scss';
@@ -29,6 +29,7 @@ export function SetupPage(): React.ReactElement {
   const [targetLtv, setTargetLtv] = React.useState<number>(0.75);
   const [depositAmount, setDepositAmount] = React.useState<string>('');
   const [collaterals, setCollaterals] = React.useState<CollateralAsset[]>([]);
+  const [marketData, setMarketData] = React.useState<MarketData | null>(null);
   const [isLoading, setIsLoading] = React.useState<boolean>(false);
   const [isLoadingCollaterals, setIsLoadingCollaterals] = React.useState<boolean>(true);
 
@@ -43,8 +44,12 @@ export function SetupPage(): React.ReactElement {
       if (!accountAddress || !authToken) return;
       try {
         setIsLoadingCollaterals(true);
-        const supportedCollaterals = await moneyHackClient.getSupportedCollaterals(authToken);
+        const [supportedCollaterals, fetchedMarketData] = await Promise.all([
+          moneyHackClient.getSupportedCollaterals(authToken),
+          moneyHackClient.getMarketData(),
+        ]);
         setCollaterals(supportedCollaterals);
+        setMarketData(fetchedMarketData);
         if (supportedCollaterals.length > 0) {
           setSelectedCollateral(supportedCollaterals[0]);
         }
@@ -57,6 +62,11 @@ export function SetupPage(): React.ReactElement {
     };
     loadCollaterals();
   }, [accountAddress, authToken, moneyHackClient, toastManager]);
+
+  const getCollateralMarketData = React.useCallback((collateralAddress: string): CollateralMarketData | null => {
+    if (!marketData) return null;
+    return marketData.collateralMarkets.find((m) => m.collateralAddress.toLowerCase() === collateralAddress.toLowerCase()) ?? null;
+  }, [marketData]);
 
   const handleCollateralNext = React.useCallback((): void => {
     if (!selectedCollateral) {
@@ -158,33 +168,59 @@ export function SetupPage(): React.ReactElement {
           <Text alignment={TextAlignment.Center}>Choose which asset you want to deposit as collateral</Text>
           <Spacing />
           {isLoadingCollaterals ? (
-            <Text>Loading collaterals...</Text>
+            <Stack direction={Direction.Vertical} childAlignment={Alignment.Center} shouldAddGutters={true}>
+              <Text>Loading collaterals...</Text>
+              <Text variant='note'>Fetching live rates from Morpho & Yo.xyz</Text>
+            </Stack>
           ) : (
             <Stack direction={Direction.Vertical} shouldAddGutters={true} isFullWidth={true}>
-              {collaterals.map((collateral: CollateralAsset): React.ReactElement => (
-                <button
-                  key={collateral.address}
-                  type='button'
-                  className={`selectionCard ${selectedCollateral?.address === collateral.address ? 'selected' : ''}`}
-                  onClick={(): void => setSelectedCollateral(collateral)}
-                >
-                  <Stack direction={Direction.Horizontal} childAlignment={Alignment.Center} contentAlignment={Alignment.Start} shouldAddGutters={true} isFullWidth={true}>
-                    {collateral.logoUri && (
-                      <Box width='32px' height='32px'>
-                        <Image source={collateral.logoUri} alternativeText={collateral.symbol} isFullWidth={true} isFullHeight={true} />
-                      </Box>
-                    )}
-                    <Stack direction={Direction.Vertical} childAlignment={Alignment.Start}>
-                      <Text variant='bold'>{collateral.symbol}</Text>
-                      <Text variant='note'>{collateral.name}</Text>
+              {collaterals.map((collateral: CollateralAsset): React.ReactElement => {
+                const collateralMarket = getCollateralMarketData(collateral.address);
+                return (
+                  <button
+                    key={collateral.address}
+                    type='button'
+                    className={`selectionCard ${selectedCollateral?.address === collateral.address ? 'selected' : ''}`}
+                    onClick={(): void => setSelectedCollateral(collateral)}
+                  >
+                    <Stack direction={Direction.Horizontal} childAlignment={Alignment.Center} contentAlignment={Alignment.Start} shouldAddGutters={true} isFullWidth={true}>
+                      {collateral.logoUri && (
+                        <Box width='32px' height='32px'>
+                          <Image source={collateral.logoUri} alternativeText={collateral.symbol} isFullWidth={true} isFullHeight={true} />
+                        </Box>
+                      )}
+                      <Stack direction={Direction.Vertical} childAlignment={Alignment.Start}>
+                        <Text variant='bold'>{collateral.symbol}</Text>
+                        <Text variant='note'>
+                          {collateralMarket
+                            ? `Borrow: ${(collateralMarket.borrowApy * 100).toFixed(2)}% • Max LTV: ${(collateralMarket.maxLtv * 100).toFixed(0)}%`
+                            : collateral.name}
+                        </Text>
+                      </Stack>
+                      <Stack.Item growthFactor={1} shrinkFactor={1} />
+                      {selectedCollateral?.address === collateral.address && (
+                        <KibaIcon iconId='ion-checkmark-circle' variant='large' />
+                      )}
                     </Stack>
+                  </button>
+                );
+              })}
+              {marketData && (
+                <Box variant='card' isFullWidth={true}>
+                  <Stack direction={Direction.Horizontal} contentAlignment={Alignment.Center} shouldAddGutters={true} paddingHorizontal={PaddingSize.Default} paddingVertical={PaddingSize.Narrow}>
+                    <Text variant='note'>
+                      Yield vault:
+                      {' '}
+                      {marketData.yieldVaultName}
+                    </Text>
                     <Stack.Item growthFactor={1} shrinkFactor={1} />
-                    {selectedCollateral?.address === collateral.address && (
-                      <KibaIcon iconId='ion-checkmark-circle' variant='large' />
-                    )}
+                    <Text variant='note' tag='success'>
+                      {(marketData.yieldApy * 100).toFixed(2)}
+                      % APY
+                    </Text>
                   </Stack>
-                </button>
-              ))}
+                </Box>
+              )}
             </Stack>
           )}
           <Spacing />
@@ -278,9 +314,31 @@ export function SetupPage(): React.ReactElement {
                 </Text>
               </Stack>
               <Stack direction={Direction.Horizontal} contentAlignment={Alignment.Start}>
-                <Text>Est. Yield APY:</Text>
+                <Text>Borrow APY:</Text>
                 <Stack.Item growthFactor={1} shrinkFactor={1} />
-                <Text variant='bold'>~8%</Text>
+                <Text variant='bold'>
+                  {getCollateralMarketData(selectedCollateral.address) ? `${(getCollateralMarketData(selectedCollateral.address)!.borrowApy * 100).toFixed(2)}%` : '~3%'}
+                </Text>
+              </Stack>
+              <Stack direction={Direction.Horizontal} contentAlignment={Alignment.Start}>
+                <Text>
+                  Yield APY (
+                  {marketData?.yieldVaultName ?? 'Yo'}
+                  ):
+                </Text>
+                <Stack.Item growthFactor={1} shrinkFactor={1} />
+                <Text variant='bold'>
+                  {marketData ? `${(marketData.yieldApy * 100).toFixed(2)}%` : '~8%'}
+                </Text>
+              </Stack>
+              <Stack direction={Direction.Horizontal} contentAlignment={Alignment.Start}>
+                <Text>Est. Net APY:</Text>
+                <Stack.Item growthFactor={1} shrinkFactor={1} />
+                <Text variant='bold' tag='success'>
+                  {marketData && getCollateralMarketData(selectedCollateral.address)
+                    ? `${((marketData.yieldApy - getCollateralMarketData(selectedCollateral.address)!.borrowApy) * 100).toFixed(2)}%`
+                    : '~5%'}
+                </Text>
               </Stack>
             </Stack>
           </Box>

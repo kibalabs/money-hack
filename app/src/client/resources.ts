@@ -81,3 +81,41 @@ export class UserConfig {
     );
   };
 }
+
+export class CollateralMarketData {
+  public constructor(
+    readonly collateralAddress: string,
+    readonly collateralSymbol: string,
+    readonly borrowApy: number,
+    readonly maxLtv: number,
+    readonly marketId: string | null,
+  ) { }
+
+  public static fromObject = (obj: RawObject): CollateralMarketData => {
+    return new CollateralMarketData(
+      String(obj.collateral_address),
+      String(obj.collateral_symbol),
+      Number(obj.borrow_apy),
+      Number(obj.max_ltv),
+      obj.market_id ? String(obj.market_id) : null,
+    );
+  };
+}
+
+export class MarketData {
+  public constructor(
+    readonly collateralMarkets: CollateralMarketData[],
+    readonly yieldApy: number,
+    readonly yieldVaultAddress: string,
+    readonly yieldVaultName: string,
+  ) { }
+
+  public static fromObject = (obj: RawObject): MarketData => {
+    return new MarketData(
+      (obj.collateral_markets as RawObject[]).map(CollateralMarketData.fromObject),
+      Number(obj.yield_apy),
+      String(obj.yield_vault_address),
+      String(obj.yield_vault_name),
+    );
+  };
+}

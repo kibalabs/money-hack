@@ -192,3 +192,27 @@ export class ClosePositionResponse extends ResponseData {
     );
   };
 }
+
+export class GetMarketDataRequest extends RequestData {
+  public constructor() {
+    super();
+  }
+
+  public toObject = (): RawObject => {
+    return {};
+  };
+}
+
+export class GetMarketDataResponse extends ResponseData {
+  public constructor(
+    readonly marketData: Resources.MarketData,
+  ) {
+    super();
+  }
+
+  public static fromObject = (obj: RawObject): GetMarketDataResponse => {
+    return new GetMarketDataResponse(
+      Resources.MarketData.fromObject(obj as RawObject),
+    );
+  };
+}

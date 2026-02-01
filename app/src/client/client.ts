@@ -70,4 +70,12 @@ export class MoneyHackClient extends ServiceClient {
     const response = await this.makeRequest(method, path, request, Endpoints.ClosePositionResponse, this.getHeaders(authToken));
     return response.transactionHash;
   };
+
+  public getMarketData = async (): Promise<Resources.MarketData> => {
+    const method = RestMethod.GET;
+    const path = 'v1/market-data';
+    const request = new Endpoints.GetMarketDataRequest();
+    const response = await this.makeRequest(method, path, request, Endpoints.GetMarketDataResponse, this.getHeaders(null));
+    return response.marketData;
+  };
 }

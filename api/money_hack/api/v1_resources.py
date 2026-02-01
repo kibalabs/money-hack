@@ -88,3 +88,18 @@ class WithdrawResponse(BaseModel):
 
 class ClosePositionResponse(BaseModel):
     transaction_hash: str
+
+
+class CollateralMarketData(BaseModel):
+    collateral_address: str
+    collateral_symbol: str
+    borrow_apy: float
+    max_ltv: float
+    market_id: str | None
+
+
+class MarketDataResponse(BaseModel):
+    collateral_markets: list[CollateralMarketData]
+    yield_apy: float
+    yield_vault_address: str
+    yield_vault_name: str

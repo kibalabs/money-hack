@@ -17,10 +17,13 @@ from web3 import Web3
 from money_hack.api.authorizer import Authorizer
 from money_hack.api.v1_resources import AuthToken
 from money_hack.api.v1_resources import CollateralAsset
+from money_hack.api.v1_resources import CollateralMarketData
 from money_hack.api.v1_resources import Position
 from money_hack.api.v1_resources import UserConfig
 from money_hack.blockchain_data.alchemy_client import AlchemyClient
 from money_hack.blockchain_data.moralis_client import MoralisClient
+from money_hack.morpho.morpho_client import MorphoClient
+from money_hack.yo.yo_client import YoClient
 
 w3 = Web3()
 
@@ -35,9 +38,12 @@ ERC1271_ABI: ABI = [
 
 SUPPORTED_COLLATERALS = [
     CollateralAsset(chain_id=8453, address='0x4200000000000000000000000000000000000006', symbol='WETH', name='Wrapped Ether', decimals=18, logo_uri='https://assets.coingecko.com/coins/images/2518/small/weth.png'),
-    CollateralAsset(chain_id=8453, address='0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599', symbol='WBTC', name='Wrapped Bitcoin', decimals=8, logo_uri='https://assets.coingecko.com/coins/images/7598/small/wrapped_bitcoin_wbtc.png'),
     CollateralAsset(chain_id=8453, address='0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf', symbol='cbBTC', name='Coinbase Wrapped BTC', decimals=8, logo_uri='https://assets.coingecko.com/coins/images/40143/standard/cbbtc.webp'),
+    CollateralAsset(chain_id=8453, address='0x0555E30da8f98308EdB960aa94C0Db47230d2B9c', symbol='WBTC', name='Wrapped BTC', decimals=8, logo_uri='https://assets.coingecko.com/coins/images/7598/small/wrapped_bitcoin_wbtc.png'),
 ]
+
+YO_VAULT_ADDRESS = '0x0000000f2eB9f69274678c76222B35eEc7588a65'
+YO_VAULT_NAME = 'Yo USDC Vault'
 
 
 class AgentManager(Authorizer):
@@ -48,12 +54,16 @@ class AgentManager(Authorizer):
         ethClient: RestEthClient,
         moralisClient: MoralisClient,
         alchemyClient: AlchemyClient,
+        morphoClient: MorphoClient,
+        yoClient: YoClient,
     ) -> None:
         self.chainId = chainId
         self.requester = requester
         self.ethClient = ethClient
         self.moralisClient = moralisClient
         self.alchemyClient = alchemyClient
+        self.morphoClient = morphoClient
+        self.yoClient = yoClient
         self._signatureSignerMap: dict[str, str] = {}
 
     async def _get_asset_price(self, assetAddress: str) -> float:
@@ -117,7 +127,7 @@ class AgentManager(Authorizer):
         try:
             price_usd = await self._get_asset_price(assetAddress=collateral_asset_address)
             # Convert collateral_amount (raw) to human readable using decimals
-            collateral_amount_human = int(collateral_amount) / (10 ** collateral.decimals)
+            collateral_amount_human = int(collateral_amount) / (10**collateral.decimals)
             collateral_value = collateral_amount_human * price_usd
             logging.info(f'Price for {collateral.symbol}: ${price_usd:.2f}, collateral value: ${collateral_value:.2f}')
         except Exception as e:
@@ -148,6 +158,39 @@ class AgentManager(Authorizer):
 
     async def get_position(self, user_address: str) -> Position | None:  # noqa: ARG002
         return None
+
+    async def get_market_data(self) -> tuple[list[CollateralMarketData], float, str, str]:
+        collateralMarkets: list[CollateralMarketData] = []
+        for collateral in SUPPORTED_COLLATERALS:
+            market = await self.morphoClient.get_market(
+                chain_id=self.chainId,
+                collateral_address=collateral.address,
+                loan_address=None,
+            )
+            if market is not None:
+                collateralMarkets.append(
+                    CollateralMarketData(
+                        collateral_address=collateral.address,
+                        collateral_symbol=collateral.symbol,
+                        borrow_apy=market.borrow_apy,
+                        max_ltv=market.lltv,
+                        market_id=market.unique_key,
+                    )
+                )
+            else:
+                collateralMarkets.append(
+                    CollateralMarketData(
+                        collateral_address=collateral.address,
+                        collateral_symbol=collateral.symbol,
+                        borrow_apy=0.03,
+                        max_ltv=0.86,
+                        market_id=None,
+                    )
+                )
+        yieldApy = await self.yoClient.get_yield_apy(chainId=self.chainId)
+        if yieldApy is None:
+            yieldApy = 0.08
+        return collateralMarkets, yieldApy, YO_VAULT_ADDRESS, YO_VAULT_NAME
 
     async def withdraw_usdc(self, user_address: str, amount: str) -> tuple[Position, str]:
         raise NotImplementedError('withdraw_usdc not implemented')
