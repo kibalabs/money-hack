@@ -66,20 +66,24 @@ class AgentManager(Authorizer):
         self.morphoClient = morphoClient
         self.yoClient = yoClient
         self._signatureSignerMap: dict[str, str] = {}
+        self._positions: dict[str, Position] = {}
+        self._userConfigs: dict[str, UserConfig] = {}
 
     async def _get_asset_price(self, assetAddress: str) -> float:
         """Get the current USD price for an asset. Tries Alchemy first, falls back to Moralis."""
         try:
             priceData = await self.alchemyClient.get_asset_current_price(chainId=self.chainId, assetAddress=assetAddress)
-            return priceData.priceUsd
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logging.warning(f'Alchemy price fetch failed for {assetAddress}, trying Moralis: {e}')
             try:
                 priceData = await self.moralisClient.get_asset_current_price(chainId=self.chainId, assetAddress=assetAddress)
-                return priceData.priceUsd
             except Exception as e2:
                 logging.error(f'Both Alchemy and Moralis price fetch failed for {assetAddress}: {e2}')
                 raise
+            else:
+                return priceData.priceUsd
+        else:
+            return priceData.priceUsd
 
     async def _retrieve_signature_signer_address(self, signatureString: str) -> str:
         if signatureString in self._signatureSignerMap:
@@ -115,11 +119,17 @@ class AgentManager(Authorizer):
     async def get_supported_collaterals(self) -> list[CollateralAsset]:
         return SUPPORTED_COLLATERALS
 
-    async def get_user_config(self, user_address: str) -> UserConfig:  # noqa: ARG002
+    async def get_user_config(self, user_address: str) -> UserConfig:
+        normalized_address = chain_util.normalize_address(user_address)
+        if normalized_address in self._userConfigs:
+            return self._userConfigs[normalized_address]
         return UserConfig(telegram_handle=None, preferred_ltv=0.75)
 
-    async def update_user_config(self, user_address: str, telegram_handle: str | None, preferred_ltv: float) -> UserConfig:  # noqa: ARG002
-        return UserConfig(telegram_handle=telegram_handle, preferred_ltv=preferred_ltv)
+    async def update_user_config(self, user_address: str, telegram_handle: str | None, preferred_ltv: float) -> UserConfig:
+        normalized_address = chain_util.normalize_address(user_address)
+        config = UserConfig(telegram_handle=telegram_handle, preferred_ltv=preferred_ltv)
+        self._userConfigs[normalized_address] = config
+        return config
 
     async def create_position(self, user_address: str, collateral_asset_address: str, collateral_amount: str, target_ltv: float) -> Position:
         collateral = next((c for c in SUPPORTED_COLLATERALS if c.address.lower() == collateral_asset_address.lower()), SUPPORTED_COLLATERALS[0])
@@ -131,16 +141,27 @@ class AgentManager(Authorizer):
             collateral_amount_human = int(collateral_amount) / (10**collateral.decimals)
             collateral_value = collateral_amount_human * price_usd
             logging.info(f'Price for {collateral.symbol}: ${price_usd:.2f}, collateral value: ${collateral_value:.2f}')
-        except Exception as e:
-            logging.error(f'Failed to fetch price for {collateral_asset_address}, using fallback: {e}')
+        except Exception:  # noqa: BLE001
+            logging.exception(f'Failed to fetch price for {collateral_asset_address}, using fallback')
             # Fallback to hardcoded value if price fetch fails
             collateral_value = 100000.0
 
         borrow_value = collateral_value * target_ltv
-        return Position(
+        normalized_address = chain_util.normalize_address(user_address)
+
+        # Get current yield APY for estimated_apy
+        estimated_apy = 0.08
+        try:
+            yield_apy = await self.yoClient.get_yield_apy(chainId=self.chainId)
+            if yield_apy is not None:
+                estimated_apy = yield_apy
+        except Exception:  # noqa: BLE001
+            logging.exception('Failed to get yield APY for position')
+
+        position = Position(
             position_id=f'pos-{user_address[:8]}',
             created_date=datetime.now(tz=UTC),
-            user_address=user_address,
+            user_address=normalized_address,
             collateral_asset=collateral,
             collateral_amount=collateral_amount,
             collateral_value_usd=collateral_value,
@@ -153,12 +174,63 @@ class AgentManager(Authorizer):
             vault_balance_usd=borrow_value,
             accrued_yield='0',
             accrued_yield_usd=0.0,
-            estimated_apy=0.08,
+            estimated_apy=estimated_apy,
             status='active',
         )
 
-    async def get_position(self, user_address: str) -> Position | None:  # noqa: ARG002
-        return None
+        self._positions[normalized_address] = position
+        logging.info(f'Created position for {normalized_address}: {position.position_id}')
+        return position
+
+    async def get_position(self, user_address: str) -> Position | None:
+        normalized_address = chain_util.normalize_address(user_address)
+        position = self._positions.get(normalized_address)
+        if position is None:
+            return None
+
+        # Refresh position data with current prices
+        try:
+            price_usd = await self._get_asset_price(assetAddress=position.collateral_asset.address)
+            collateral_amount_human = int(position.collateral_amount) / (10**position.collateral_asset.decimals)
+            collateral_value = collateral_amount_human * price_usd
+
+            # Recalculate LTV based on current collateral value
+            borrow_value = position.borrow_value_usd
+            current_ltv = borrow_value / collateral_value if collateral_value > 0 else 0
+
+            # Get current market data for max LTV
+            market = await self.morphoClient.get_market(
+                chain_id=self.chainId,
+                collateral_address=position.collateral_asset.address,
+            )
+            max_ltv = market.lltv if market else 0.86
+
+            # Update position with current values
+            updated_position = Position(
+                position_id=position.position_id,
+                created_date=position.created_date,
+                user_address=position.user_address,
+                collateral_asset=position.collateral_asset,
+                collateral_amount=position.collateral_amount,
+                collateral_value_usd=collateral_value,
+                borrow_amount=position.borrow_amount,
+                borrow_value_usd=borrow_value,
+                current_ltv=current_ltv,
+                target_ltv=position.target_ltv,
+                health_factor=max_ltv / current_ltv if current_ltv > 0 else 999,
+                vault_balance=position.vault_balance,
+                vault_balance_usd=position.vault_balance_usd,
+                accrued_yield=position.accrued_yield,
+                accrued_yield_usd=position.accrued_yield_usd,
+                estimated_apy=position.estimated_apy,
+                status=position.status,
+            )
+        except Exception:  # noqa: BLE001
+            logging.exception('Failed to refresh position data')
+            return position
+        else:
+            self._positions[normalized_address] = updated_position
+            return updated_position
 
     async def get_market_data(self) -> tuple[list[CollateralMarketData], float, str, str]:
         collateralMarkets: list[CollateralMarketData] = []

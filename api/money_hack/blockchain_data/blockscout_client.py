@@ -77,6 +77,6 @@ class BlockscoutClient:
             url += f'&topic0_1_opr=and&topic1={topic1}'
         response = await self._make_request(url=url)
         result = response.get('result')
-        if result is None:
+        if result is None or not isinstance(result, list):
             return []
-        return [BlockscoutLog(**item) for item in result]  # type: ignore[arg-type]
+        return [BlockscoutLog(**item) for item in result]

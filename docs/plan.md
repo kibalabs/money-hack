@@ -2,12 +2,12 @@
 
 ## Implementation Status
 
-### ✅ Completed
+### ✅ Phase 1: Foundation (Complete)
 
 #### Frontend (app/)
 - **Wallet Connection**: Full WalletConnect/Base wallet integration with SIWE login
 - **Setup Screen (4-step wizard)**:
-  - Step 1: Collateral selection (WETH, WBTC, cbBTC) with logos
+  - Step 1: Collateral selection (WETH, cbBTC) with logos
   - Step 2: Target LTV selection (65%, 70%, 75%, 80%)
   - Step 3: Deposit amount with summary preview (collateral, LTV, estimated borrow, APY)
   - Step 4: Telegram connection (required - explains why notifications are needed for autonomous agent)
@@ -16,50 +16,116 @@
 - **Navigation Flow**: HomePage → (login) → SetupPage → (create position) → AgentPage
 
 #### Backend (api/)
-- **API Endpoints** (v1_api.py):
-  - `GET /v1/collaterals` - List supported collateral assets
-  - `GET /v1/users/{address}/config` - Get user preferences
-  - `POST /v1/users/{address}/config` - Update telegram handle & preferred LTV
-  - `GET /v1/users/{address}/position` - Get current position
-  - `POST /v1/users/{address}/position` - Create new position
-  - `POST /v1/users/{address}/position/withdraw` - Withdraw USDC
-  - `POST /v1/users/{address}/position/close` - Close position
+- **API Endpoints**: Full REST API for collaterals, user config, positions, wallet balances, market data
 - **Signature Validation**: Full SIWE + ERC-1271 smart wallet signature verification
-- **Resource Models**: CollateralAsset, Position, UserConfig with Pydantic
-- **Price Feeds**: Real-time collateral price fetching via Alchemy/Moralis APIs (copied from agent-hack)
-- **Position Creation**: Uses real prices to calculate collateral USD value
+- **Resource Models**: CollateralAsset, Position, UserConfig, Wallet, CollateralMarketData with Pydantic
+- **Price Feeds**: Real-time collateral price fetching via Alchemy/Moralis APIs
 
-### 🔲 Not Yet Implemented
+### ✅ Phase 2: Market Data Integration (Complete)
+
+#### Morpho Integration (morpho/)
+- **MorphoClient**: GraphQL client for Morpho Blue API
+- **Market Data**: Fetch borrow APY, max LTV (LLTV), utilization, supply/borrow totals
+- **Market Selection**: Automatically select best market by liquidity for collateral/USDC pairs
+- **Supported Methods**: `get_market()`, `get_borrow_apy()`, `get_max_ltv()`, `get_markets_for_collateral()`
+
+#### Yo.xyz Vault Integration (yo/)
+- **YoClient**: On-chain vault interaction via ERC-4626 ABI
+- **Vault Info**: Fetch vault name, symbol, asset, decimals, total assets
+- **APY Calculation**: Calculate real APY from share price oracle updates over time
+- **Supported Methods**: `get_vault_info()`, `get_yield_apy()`
+
+#### API Endpoint
+- **`GET /v1/market-data`**: Returns all collateral markets (borrow APY, max LTV) + vault yield APY
+
+---
+
+## Remaining Phases
+
+### ✅ Phase 3: Dashboard & Position Display (Complete)
+
+**Goal**: Show users their active position with real-time data
 
 #### Frontend
-- **Dashboard Screen**: Real-time position display (collateral value, borrow amount, LTV, health factor, vault balance, yield)
-- **Withdrawal Modal**: USDC withdrawal with projected LTV warnings
-- **Unwind Position**: Full position close UI
-- **Notifications Page**: Telegram setup confirmation and alert history
+- **PositionDashboard Component**: Full dashboard with collateral info, LTV gauge, key stats grid, rate comparison
+- **Health Status Indicators**: Visual gauge with healthy/warning/danger states based on LTV vs max LTV
+- **Market Rates Display**: Shows borrow APY, yield APY, and net spread
+- **Action Buttons**: Refresh, Withdraw USDC, Close Position (UI ready, functionality placeholder)
 
-#### Backend - Onchain Integration
-- **Morpho Integration**: Actual supply/borrow calls to Morpho protocol
-- **Gauntlet Vault Integration**: Deposit/withdraw USDC to yield vault
-- **Li.Fi Batching**: Multi-step transaction composition
-- **ENS Storage**: Storing user preferences (telegram_handle, preferred_ltv) onchain
+#### Backend
+- **In-Memory Position Storage**: Positions persisted in `_positions` dict (per server instance)
+- **Position Refresh on Read**: `get_position()` refreshes collateral value and recalculates LTV with live prices
+- **User Config Storage**: `_userConfigs` dict stores telegram handle and preferred LTV
 
-#### Backend - Data Persistence
-- **In-Memory Position Storage**: Currently positions are not persisted between server restarts
-- **Database Integration**: For production, need proper persistence layer
+---
 
-#### Background Operations
-- **LTV Monitoring Worker**: Periodic position health checks (every 5-10 min)
-- **Auto-Rebalancing**: Automatic repay when LTV exceeds threshold
-- **Auto-Borrow**: Borrow more when LTV drops below target (if profitable)
-- **Profitability Checks**: Compare yield APY vs borrow APR before actions
+### 🔲 Phase 4: On-Chain Position Creation
 
-#### Notifications
-- **Telegram Bot Integration**: Proper bot setup like agent-hack (see reference implementation below)
-- **Alert Types**: Position opened, LTV adjustment, critical warnings, close confirmation
+**Goal**: Actually execute supply/borrow/deposit transactions on-chain
+
+#### Backend
+- **Morpho Supply**: Supply collateral to Morpho market
+- **Morpho Borrow**: Borrow USDC against collateral
+- **Yo Vault Deposit**: Deposit borrowed USDC into Yo vault
+- **Transaction Batching**: Compose multi-step transactions (supply → borrow → deposit)
+
+#### Frontend
+- **Transaction Flow**: Approval + batch transaction signing
+- **Transaction Status**: Pending/confirmed states, transaction hash display
+
+---
+
+### 🔲 Phase 5: Withdrawals & Position Management
+
+**Goal**: Allow users to withdraw USDC and close positions
+
+#### Frontend
+- **Withdrawal Modal**: Input amount, show projected LTV after withdrawal, safety warnings
+- **Close Position UI**: Confirm unwind with summary of returned assets
+
+#### Backend
+- **Safe Withdrawal Calculation**: Compute max withdrawable amount while maintaining healthy LTV
+- **Yo Vault Withdraw**: Withdraw USDC from vault
+- **Morpho Repay**: Repay USDC debt
+- **Morpho Withdraw Collateral**: Return collateral to user
+
+---
+
+### 🔲 Phase 6: Autonomous LTV Management
+
+**Goal**: Agent automatically maintains healthy positions
+
+#### Background Worker
+- **LTV Monitoring**: Periodic position health checks (every 5-10 min)
+- **Auto-Repay**: When LTV exceeds target, withdraw from vault and repay debt
+- **Auto-Borrow**: When LTV drops significantly below target (and profitable), borrow more and deposit to vault
+- **Profitability Gate**: Only take action if yield APY > borrow APR + estimated fees
+
+---
+
+### 🔲 Phase 7: Telegram Notifications
+
+**Goal**: Keep users informed of position changes
+
+#### Backend
+- **Telegram Bot Setup**: Create bot via BotFather
+- **User Linking**: OAuth-style flow to link wallet address to Telegram chat_id
+- **Notification Types**:
+  - Position opened confirmation
+  - LTV adjustment alerts (auto-repay/auto-borrow)
+  - Critical warnings (LTV approaching liquidation)
+  - Position closed confirmation
+
+---
+
+### 🔲 Phase 8: Agent Wallet & Security (Stretch)
+
+**Goal**: Use ERC-4337 agent wallets for secure autonomous execution
 
 #### Smart Contracts
-- **AgentWalletKit Integration**: ERC-4337 agent wallet creation
-- **Adapter Registry**: Restrict actions to approved protocols only
+- **AgentWalletKit Integration**: Create agent wallet per user
+- **Adapter Registry**: Restrict agent to only approved protocol interactions (Morpho, Yo vault)
+- **User Approval**: User signs UserOp to authorize agent actions
 
 ---
 

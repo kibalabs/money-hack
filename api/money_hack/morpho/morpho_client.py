@@ -1,3 +1,5 @@
+import typing
+
 from core import logging
 from core.requester import Requester
 from core.util import chain_util
@@ -34,7 +36,7 @@ class MorphoClient:
     def __init__(self, requester: Requester) -> None:
         self.requester = requester
 
-    async def _query_graphql(self, query: str, variables: dict) -> dict:
+    async def _query_graphql(self, query: str, variables: dict[str, typing.Any]) -> dict[str, typing.Any]:  # type: ignore[explicit-any]
         """Execute a GraphQL query against Morpho's API"""
         response = await self.requester.post_json(
             url=self.GRAPHQL_URL,
@@ -44,7 +46,7 @@ class MorphoClient:
             },
             timeout=30,
         )
-        return response.json()
+        return dict(response.json())
 
     async def get_market(
         self,
@@ -185,7 +187,7 @@ class MorphoClient:
 
         return market.lltv
 
-    def _parse_market(self, market_dict: dict, chain_id: int) -> MorphoMarket:
+    def _parse_market(self, market_dict: dict[str, typing.Any], chain_id: int) -> MorphoMarket:  # type: ignore[explicit-any]
         """Parse a market dict from GraphQL response into MorphoMarket"""
         state = market_dict.get('state', {})
         collateral = market_dict.get('collateralAsset', {})

@@ -54,7 +54,7 @@ export function SetupPage(): React.ReactElement {
         setMarketData(fetchedMarketData);
         setWallet(fetchedWallet);
         const firstWithBalance = supportedCollaterals.find((collateral) => {
-          const balance = fetchedWallet.assetBalances.find((b) => b.tokenAddress.toLowerCase() === collateral.address.toLowerCase());
+          const balance = fetchedWallet.assetBalances.find((b) => b.assetAddress.toLowerCase() === collateral.address.toLowerCase());
           return balance && balance.balance > 0n;
         });
         if (firstWithBalance) {
@@ -255,7 +255,7 @@ export function SetupPage(): React.ReactElement {
                       {marketData.yieldVaultName}
                     </Text>
                     <Stack.Item growthFactor={1} shrinkFactor={1} />
-                    <Text variant='note' tag='success'>
+                    <Text variant='note-success'>
                       {(marketData.yieldApy * 100).toFixed(2)}
                       % APY
                     </Text>
@@ -386,7 +386,7 @@ export function SetupPage(): React.ReactElement {
               <Stack direction={Direction.Horizontal} contentAlignment={Alignment.Start}>
                 <Text>Est. Net APY:</Text>
                 <Stack.Item growthFactor={1} shrinkFactor={1} />
-                <Text variant='bold' tag='success'>
+                <Text variant='bold-success'>
                   {marketData && getCollateralMarketData(selectedCollateral.address)
                     ? `${((marketData.yieldApy - getCollateralMarketData(selectedCollateral.address)!.borrowApy) * 100).toFixed(2)}%`
                     : '~5%'}
