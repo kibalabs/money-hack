@@ -107,3 +107,18 @@
     }
   }
 }
+
+.KibaInputWrapper {
+  .KibaInputWrapperInner {
+    background-color: var(--kiba-color-background);
+    border-color: var(--kiba-color-text-clear80);
+  }
+
+  &.disabled .KibaInputWrapperInner {
+    background-color: var(--kiba-color-background);
+  }
+
+  &.error .KibaInputWrapperInner {
+    background-color: var(--kiba-color-background);
+  }
+}

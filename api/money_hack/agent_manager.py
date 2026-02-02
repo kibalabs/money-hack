@@ -14,18 +14,24 @@ from hexbytes import HexBytes
 from siwe import SiweMessage  # type: ignore[import-untyped]
 from web3 import Web3
 
+from money_hack import constants
 from money_hack.api.authorizer import Authorizer
 from money_hack.api.v1_resources import AssetBalance
 from money_hack.api.v1_resources import AuthToken
 from money_hack.api.v1_resources import CollateralAsset
 from money_hack.api.v1_resources import CollateralMarketData
 from money_hack.api.v1_resources import Position
+from money_hack.api.v1_resources import PositionTransactionsData
 from money_hack.api.v1_resources import UserConfig
 from money_hack.api.v1_resources import Wallet
 from money_hack.blockchain_data.alchemy_client import AlchemyClient
 from money_hack.blockchain_data.moralis_client import MoralisClient
+from money_hack.external.telegram_client import TelegramAuthData
+from money_hack.external.telegram_client import TelegramClient
+from money_hack.forty_acres.forty_acres_client import FortyAcresClient
 from money_hack.morpho.morpho_client import MorphoClient
-from money_hack.yo.yo_client import YoClient
+from money_hack.morpho.transaction_builder import TransactionBuilder
+from money_hack.store.file_store import FileStore
 
 w3 = Web3()
 
@@ -56,7 +62,9 @@ class AgentManager(Authorizer):
         moralisClient: MoralisClient,
         alchemyClient: AlchemyClient,
         morphoClient: MorphoClient,
-        yoClient: YoClient,
+        fortyAcresClient: FortyAcresClient,
+        telegramClient: TelegramClient,
+        fileStore: FileStore,
     ) -> None:
         self.chainId = chainId
         self.requester = requester
@@ -64,10 +72,12 @@ class AgentManager(Authorizer):
         self.moralisClient = moralisClient
         self.alchemyClient = alchemyClient
         self.morphoClient = morphoClient
-        self.yoClient = yoClient
+        self.fortyAcresClient = fortyAcresClient
+        self.telegramClient = telegramClient
+        self.fileStore = fileStore
         self._signatureSignerMap: dict[str, str] = {}
-        self._positions: dict[str, Position] = {}
-        self._userConfigs: dict[str, UserConfig] = {}
+        self._positionsCache: dict[str, Position] = {}
+        self._userConfigsCache: dict[str, UserConfig] = {}
 
     async def _get_asset_price(self, assetAddress: str) -> float:
         """Get the current USD price for an asset. Tries Alchemy first, falls back to Moralis."""
@@ -121,14 +131,20 @@ class AgentManager(Authorizer):
 
     async def get_user_config(self, user_address: str) -> UserConfig:
         normalized_address = chain_util.normalize_address(user_address)
-        if normalized_address in self._userConfigs:
-            return self._userConfigs[normalized_address]
-        return UserConfig(telegram_handle=None, preferred_ltv=0.75)
+        if normalized_address in self._userConfigsCache:
+            return self._userConfigsCache[normalized_address]
+        config = await self.fileStore.load_user_config(normalized_address)
+        if config is not None:
+            self._userConfigsCache[normalized_address] = config
+            return config
+        return UserConfig(telegram_handle=None, telegram_chat_id=None, preferred_ltv=0.75)
 
-    async def update_user_config(self, user_address: str, telegram_handle: str | None, preferred_ltv: float) -> UserConfig:
+    async def update_user_config(self, user_address: str, telegram_handle: str | None, preferred_ltv: float | None) -> UserConfig:
         normalized_address = chain_util.normalize_address(user_address)
-        config = UserConfig(telegram_handle=telegram_handle, preferred_ltv=preferred_ltv)
-        self._userConfigs[normalized_address] = config
+        currentConfig = await self.get_user_config(user_address=normalized_address)
+        config = UserConfig(telegram_handle=telegram_handle, telegram_chat_id=currentConfig.telegram_chat_id, preferred_ltv=preferred_ltv)
+        self._userConfigsCache[normalized_address] = config
+        await self.fileStore.save_user_config(normalized_address, config)
         return config
 
     async def create_position(self, user_address: str, collateral_asset_address: str, collateral_amount: str, target_ltv: float) -> Position:
@@ -152,7 +168,7 @@ class AgentManager(Authorizer):
         # Get current yield APY for estimated_apy
         estimated_apy = 0.08
         try:
-            yield_apy = await self.yoClient.get_yield_apy(chainId=self.chainId)
+            yield_apy = await self.fortyAcresClient.get_yield_apy(chainId=self.chainId)
             if yield_apy is not None:
                 estimated_apy = yield_apy
         except Exception:  # noqa: BLE001
@@ -178,13 +194,18 @@ class AgentManager(Authorizer):
             status='active',
         )
 
-        self._positions[normalized_address] = position
+        self._positionsCache[normalized_address] = position
+        await self.fileStore.save_position(normalized_address, position)
         logging.info(f'Created position for {normalized_address}: {position.position_id}')
         return position
 
     async def get_position(self, user_address: str) -> Position | None:
         normalized_address = chain_util.normalize_address(user_address)
-        position = self._positions.get(normalized_address)
+        position = self._positionsCache.get(normalized_address)
+        if position is None:
+            position = await self.fileStore.load_position(normalized_address)
+            if position is not None:
+                self._positionsCache[normalized_address] = position
         if position is None:
             return None
 
@@ -229,7 +250,8 @@ class AgentManager(Authorizer):
             logging.exception('Failed to refresh position data')
             return position
         else:
-            self._positions[normalized_address] = updated_position
+            self._positionsCache[normalized_address] = updated_position
+            await self.fileStore.save_position(normalized_address, updated_position)
             return updated_position
 
     async def get_market_data(self) -> tuple[list[CollateralMarketData], float, str, str]:
@@ -251,7 +273,7 @@ class AgentManager(Authorizer):
                     market_id=market.unique_key,
                 )
             )
-        yieldApy = await self.yoClient.get_yield_apy(chainId=self.chainId)
+        yieldApy = await self.fortyAcresClient.get_yield_apy(chainId=self.chainId)
         if yieldApy is None:
             raise ValueError('Failed to get Yo.xyz yield APY')
         return collateralMarkets, yieldApy, YO_VAULT_ADDRESS, YO_VAULT_NAME
@@ -264,7 +286,7 @@ class AgentManager(Authorizer):
 
     async def get_wallet(self, wallet_address: str) -> Wallet:
         walletAddress = chain_util.normalize_address(wallet_address)
-        clientAssetBalances = await self.moralisClient.get_wallet_asset_balances(chainId=self.chainId, walletAddress=walletAddress)
+        clientAssetBalances = await self.alchemyClient.get_wallet_asset_balances(chainId=self.chainId, walletAddress=walletAddress)
         supportedAddresses = {c.address.lower() for c in SUPPORTED_COLLATERALS}
         assetBalances: list[AssetBalance] = []
         for clientBalance in clientAssetBalances:
@@ -289,3 +311,66 @@ class AgentManager(Authorizer):
                 )
             )
         return Wallet(wallet_address=walletAddress, asset_balances=assetBalances)
+
+    async def get_position_transactions(self, user_address: str, collateral_asset_address: str, collateral_amount: str, target_ltv: float) -> PositionTransactionsData:
+        collateral = next((c for c in SUPPORTED_COLLATERALS if c.address.lower() == collateral_asset_address.lower()), None)
+        if collateral is None:
+            raise ValueError(f'Unsupported collateral asset: {collateral_asset_address}')
+        market = await self.morphoClient.get_market(chain_id=self.chainId, collateral_address=collateral_asset_address)
+        if market is None:
+            raise ValueError(f'No Morpho market found for collateral {collateral.symbol}')
+        priceUsd = await self._get_asset_price(assetAddress=collateral_asset_address)
+        collateralAmountHuman = int(collateral_amount) / (10**collateral.decimals)
+        collateralValueUsd = collateralAmountHuman * priceUsd
+        borrowValueUsd = collateralValueUsd * target_ltv
+        borrowAmount = int(borrowValueUsd * 1e6)
+        logging.info(f'Building position transactions: collateral={collateral.symbol}, amount={collateralAmountHuman}, value=${collateralValueUsd:.2f}, borrow=${borrowValueUsd:.2f}')
+        usdcAddress = constants.CHAIN_USDC_MAP.get(self.chainId)
+        if usdcAddress is None:
+            raise ValueError(f'USDC not supported on chain {self.chainId}')
+        transactionBuilder = TransactionBuilder(chainId=self.chainId, usdcAddress=usdcAddress, yoVaultAddress=YO_VAULT_ADDRESS)
+        transactions = transactionBuilder.build_position_transactions_from_market(
+            user_address=user_address,
+            collateral_address=collateral_asset_address,
+            collateral_amount=int(collateral_amount),
+            borrow_amount=borrowAmount,
+            market=market,
+        )
+        return PositionTransactionsData(
+            transactions=transactions,
+            morpho_address=transactionBuilder.morphoAddress,
+            vault_address=transactionBuilder.yoVaultAddress,
+            estimated_borrow_amount=str(borrowAmount),
+            needs_approval=True,
+        )
+
+    async def get_telegram_login_url(self, user_address: str) -> tuple[str, str]:
+        loginUrl, secretCode = self.telegramClient.get_login_url()
+        normalizedAddress = chain_util.normalize_address(user_address)
+        await self.fileStore.set(f'telegram_secret:{secretCode}', normalizedAddress)
+        return loginUrl, secretCode
+
+    async def verify_telegram_code(self, user_address: str, secretCode: str, authData: TelegramAuthData) -> UserConfig:
+        if not self.telegramClient.verify_telegram_auth(authData):
+            raise UnauthorizedException('Invalid Telegram authentication')
+        normalizedAddress = chain_util.normalize_address(user_address)
+        storedAddress = await self.fileStore.get(f'telegram_secret:{secretCode}')
+        if storedAddress != normalizedAddress:
+            raise UnauthorizedException('Secret code does not match wallet address')
+        if not authData.id:
+            raise UnauthorizedException('Missing Telegram chat ID')
+        await self.telegramClient.link_wallet_to_telegram(walletAddress=normalizedAddress, chatId=authData.id)
+        userConfig = await self.get_user_config(user_address=normalizedAddress)
+        updatedConfig = UserConfig(telegram_handle=authData.username, telegram_chat_id=authData.id, preferred_ltv=userConfig.preferred_ltv)
+        await self.fileStore.set(f'user_config:{normalizedAddress}', updatedConfig.model_dump())
+        self._userConfigsCache[normalizedAddress] = updatedConfig
+        await self.fileStore.delete(f'telegram_secret:{secretCode}')
+        return updatedConfig
+
+    async def disconnect_telegram(self, user_address: str) -> UserConfig:
+        normalizedAddress = chain_util.normalize_address(user_address)
+        userConfig = await self.get_user_config(user_address=normalizedAddress)
+        updatedConfig = UserConfig(telegram_handle=None, telegram_chat_id=None, preferred_ltv=userConfig.preferred_ltv)
+        await self.fileStore.set(f'user_config:{normalizedAddress}', updatedConfig.model_dump())
+        self._userConfigsCache[normalizedAddress] = updatedConfig
+        return updatedConfig

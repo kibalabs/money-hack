@@ -20,7 +20,10 @@ class MorphoMarket(BaseModel):
     loan_address: str
     loan_symbol: str
     loan_decimals: int
+    oracle_address: str
+    irm_address: str
     lltv: float  # Liquidation LTV (e.g., 0.86 = 86%)
+    lltv_raw: int  # Raw LLTV value (18 decimals)
     borrow_apy: float  # Current borrow APY (e.g., 0.03 = 3%)
     supply_apy: float  # Current supply APY
     utilization: float  # Current utilization rate
@@ -193,6 +196,7 @@ class MorphoClient:
         collateral = market_dict.get('collateralAsset', {})
         loan = market_dict.get('loanAsset', {})
         rawLltv = float(market_dict.get('lltv', 0))
+        lltvRaw = int(rawLltv) if rawLltv > 1 else int(rawLltv * 1e18)
         lltv = rawLltv / 1e18 if rawLltv > 1 else rawLltv
         return MorphoMarket(
             unique_key=market_dict.get('uniqueKey', ''),
@@ -203,7 +207,10 @@ class MorphoClient:
             loan_address=chain_util.normalize_address(loan.get('address', '')),
             loan_symbol=loan.get('symbol', ''),
             loan_decimals=int(loan.get('decimals', 6)),
+            oracle_address=chain_util.normalize_address(market_dict.get('oracleAddress', '')),
+            irm_address=chain_util.normalize_address(market_dict.get('irmAddress', '')),
             lltv=lltv,
+            lltv_raw=lltvRaw,
             borrow_apy=float(state.get('borrowApy', 0) or 0),
             supply_apy=float(state.get('supplyApy', 0) or 0),
             utilization=float(state.get('utilization', 0) or 0),

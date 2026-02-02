@@ -71,12 +71,14 @@ export class Position {
 export class UserConfig {
   public constructor(
     readonly telegramHandle: string | null,
+    readonly telegramChatId: string | number | null,
     readonly preferredLtv: number,
   ) { }
 
   public static fromObject = (obj: RawObject): UserConfig => {
     return new UserConfig(
       obj.telegram_handle ? String(obj.telegram_handle) : null,
+      obj.telegram_chat_id ? (typeof obj.telegram_chat_id === 'string' ? obj.telegram_chat_id : String(obj.telegram_chat_id)) : null,
       Number(obj.preferred_ltv),
     );
   };
@@ -150,6 +152,42 @@ export class Wallet {
     return new Wallet(
       String(obj.wallet_address),
       (obj.asset_balances as RawObject[]).map(AssetBalance.fromObject),
+    );
+  };
+}
+
+export class TransactionCall {
+  public constructor(
+    readonly to: string,
+    readonly data: string,
+    readonly value: string,
+  ) { }
+
+  public static fromObject = (obj: RawObject): TransactionCall => {
+    return new TransactionCall(
+      String(obj.to),
+      String(obj.data),
+      String(obj.value || '0'),
+    );
+  };
+}
+
+export class PositionTransactions {
+  public constructor(
+    readonly transactions: TransactionCall[],
+    readonly morphoAddress: string,
+    readonly vaultAddress: string,
+    readonly estimatedBorrowAmount: bigint,
+    readonly needsApproval: boolean,
+  ) { }
+
+  public static fromObject = (obj: RawObject): PositionTransactions => {
+    return new PositionTransactions(
+      (obj.transactions as RawObject[]).map(TransactionCall.fromObject),
+      String(obj.morpho_address),
+      String(obj.vault_address),
+      BigInt(obj.estimated_borrow_amount as string),
+      Boolean(obj.needs_approval),
     );
   };
 }

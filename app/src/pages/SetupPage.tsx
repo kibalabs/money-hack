@@ -1,11 +1,12 @@
 import React from 'react';
 
 import { useNavigator } from '@kibalabs/core-react';
-import { Alignment, Box, Button, Direction, Image, InputType, KibaIcon, PaddingSize, SingleLineInput, Spacing, Stack, Text, TextAlignment } from '@kibalabs/ui-react';
+import { Alignment, Box, Button, Direction, Image, InputType, KibaIcon, Link, LoadingSpinner, PaddingSize, SingleLineInput, Spacing, Stack, Text, TextAlignment } from '@kibalabs/ui-react';
 import { useToastManager } from '@kibalabs/ui-react-toast';
+import { useWeb3Transaction } from '@kibalabs/web3-react';
 
 import { useAuth } from '../AuthContext';
-import { AssetBalance, CollateralAsset, CollateralMarketData, MarketData, Wallet } from '../client/resources';
+import { AssetBalance, CollateralAsset, CollateralMarketData, MarketData, PositionTransactions, TransactionCall, Wallet } from '../client/resources';
 import { useGlobals } from '../GlobalsContext';
 
 import './SetupPage.scss';
@@ -18,13 +19,15 @@ const LTV_OPTIONS = [
 ];
 
 export function SetupPage(): React.ReactElement {
-  const { accountAddress, authToken, isWeb3AccountLoggedIn } = useAuth();
+  const { accountAddress, accountSigner, authToken, isWeb3AccountLoggedIn } = useAuth();
   const { moneyHackClient } = useGlobals();
   const navigator = useNavigator();
   const toastManager = useToastManager();
+  const [transactionDetails, setTransactionPromise, _, clearTransaction] = useWeb3Transaction();
 
-  const [step, setStep] = React.useState<'collateral' | 'ltv' | 'deposit' | 'telegram'>('collateral');
-  const [telegramHandle, setTelegramHandle] = React.useState<string>('');
+  const [step, setStep] = React.useState<'collateral' | 'ltv' | 'deposit' | 'telegram' | 'executing'>('collateral');
+  const [telegramChatId, setTelegramChatId] = React.useState<string | null>(null);
+  const [isTelegramConnecting, setIsTelegramConnecting] = React.useState<boolean>(false);
   const [selectedCollateral, setSelectedCollateral] = React.useState<CollateralAsset | null>(null);
   const [targetLtv, setTargetLtv] = React.useState<number>(0.75);
   const [depositAmount, setDepositAmount] = React.useState<string>('');
@@ -33,12 +36,44 @@ export function SetupPage(): React.ReactElement {
   const [wallet, setWallet] = React.useState<Wallet | null>(null);
   const [isLoading, setIsLoading] = React.useState<boolean>(false);
   const [isLoadingCollaterals, setIsLoadingCollaterals] = React.useState<boolean>(true);
+  const [positionTransactions, setPositionTransactions] = React.useState<PositionTransactions | null>(null);
+  const [currentTxIndex, setCurrentTxIndex] = React.useState<number>(0);
+  const [completedTxHashes, setCompletedTxHashes] = React.useState<string[]>([]);
+  const [transactionError, setTransactionError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (!isWeb3AccountLoggedIn) {
       navigator.navigateTo('/');
     }
   }, [isWeb3AccountLoggedIn, navigator]);
+
+  React.useEffect(() => {
+    const handleTelegramCallback = async (): Promise<void> => {
+      const params = new URLSearchParams(window.location.search);
+      const secretCode = params.get('telegramSecret');
+      if (!secretCode || !accountAddress || !authToken) return;
+      try {
+        const authData = {
+          id: params.get('id'),
+          first_name: params.get('first_name'),
+          last_name: params.get('last_name'),
+          username: params.get('username'),
+          photo_url: params.get('photo_url'),
+          auth_date: params.get('auth_date'),
+          hash: params.get('hash'),
+        };
+        const filteredAuthData = Object.fromEntries(Object.entries(authData).filter(([, v]) => v != null));
+        const result = await moneyHackClient.verifyTelegramCode(accountAddress, secretCode, filteredAuthData, authToken);
+        setTelegramChatId(String(result.telegramChatId));
+        toastManager.showTextToast('Telegram connected successfully!', 'success');
+        window.history.replaceState({}, document.title, window.location.pathname);
+      } catch (error) {
+        console.error('Failed to verify Telegram code:', error);
+        toastManager.showTextToast('Failed to connect Telegram. Please try again.', 'error');
+      }
+    };
+    handleTelegramCallback();
+  }, [accountAddress, authToken, moneyHackClient, toastManager]);
 
   React.useEffect(() => {
     const loadCollaterals = async (): Promise<void> => {
@@ -121,47 +156,109 @@ export function SetupPage(): React.ReactElement {
     setStep('telegram');
   }, [depositAmount, toastManager]);
 
-  const handleCreatePosition = React.useCallback(async (): Promise<void> => {
-    if (!accountAddress || !selectedCollateral || !authToken) return;
+  const handleConnectTelegram = React.useCallback(async (): Promise<void> => {
+    if (!accountAddress || !authToken) return;
+    try {
+      setIsTelegramConnecting(true);
+      const loginUrl = await moneyHackClient.getTelegramLoginUrl(accountAddress, authToken);
+      window.location.href = loginUrl;
+    } catch (error) {
+      console.error('Failed to get Telegram login URL:', error);
+      toastManager.showTextToast('Failed to connect Telegram. Please try again.', 'error');
+      setIsTelegramConnecting(false);
+    }
+  }, [accountAddress, authToken, moneyHackClient, toastManager]);
 
-    if (!telegramHandle.trim()) {
+  const handleCreatePosition = React.useCallback(async (): Promise<void> => {
+    if (!accountAddress || !selectedCollateral || !authToken || !accountSigner) return;
+    if (!telegramChatId) {
       toastManager.showTextToast('Please connect your Telegram to continue', 'error');
       return;
     }
-
     const amount = parseFloat(depositAmount);
     if (Number.isNaN(amount) || amount <= 0) {
       toastManager.showTextToast('Please enter a valid deposit amount', 'error');
       return;
     }
-
     setIsLoading(true);
+    setTransactionError(null);
     try {
-      await moneyHackClient.updateUserConfig(
-        accountAddress,
-        telegramHandle,
-        targetLtv,
-        authToken,
-      );
-
       const collateralAmount = BigInt(Math.floor(amount * (10 ** selectedCollateral.decimals)));
-      await moneyHackClient.createPosition(
+      const transactions = await moneyHackClient.getPositionTransactions(
         accountAddress,
         selectedCollateral.address,
         collateralAmount,
         targetLtv,
         authToken,
       );
+      setPositionTransactions(transactions);
+      setCurrentTxIndex(0);
+      setCompletedTxHashes([]);
+      setStep('executing');
+    } catch (error) {
+      console.error('Failed to prepare position:', error);
+      toastManager.showTextToast('Failed to prepare position', 'error');
+      setIsLoading(false);
+    }
+  }, [accountAddress, accountSigner, authToken, selectedCollateral, depositAmount, telegramChatId, targetLtv, moneyHackClient, toastManager]);
 
+  const executeNextTransaction = React.useCallback(async (): Promise<void> => {
+    if (!positionTransactions || !accountSigner || currentTxIndex >= positionTransactions.transactions.length) return;
+    const tx = positionTransactions.transactions[currentTxIndex];
+    try {
+      const transactionPromise = accountSigner.sendTransaction({
+        to: tx.to,
+        data: tx.data,
+        value: BigInt(tx.value),
+      });
+      setTransactionPromise(transactionPromise);
+    } catch (error) {
+      console.error('Failed to send transaction:', error);
+      setTransactionError(error instanceof Error ? error.message : 'Transaction failed');
+    }
+  }, [positionTransactions, accountSigner, currentTxIndex, setTransactionPromise]);
+
+  const handleFinishPosition = React.useCallback(async (): Promise<void> => {
+    if (!accountAddress || !selectedCollateral || !authToken) return;
+    try {
+      const amount = parseFloat(depositAmount);
+      const collateralAmount = BigInt(Math.floor(amount * (10 ** selectedCollateral.decimals)));
+      await moneyHackClient.createPosition(accountAddress, selectedCollateral.address, collateralAmount, targetLtv, authToken);
       toastManager.showTextToast('Position created successfully!', 'success');
       navigator.navigateTo('/agent');
     } catch (error) {
-      console.error('Failed to create position:', error);
-      toastManager.showTextToast('Failed to create position', 'error');
+      console.error('Failed to save position:', error);
+      toastManager.showTextToast('Failed to save position', 'error');
     } finally {
       setIsLoading(false);
     }
-  }, [accountAddress, authToken, selectedCollateral, depositAmount, telegramHandle, targetLtv, moneyHackClient, toastManager, navigator]);
+  }, [accountAddress, authToken, selectedCollateral, depositAmount, targetLtv, moneyHackClient, toastManager, navigator]);
+
+  React.useEffect((): void => {
+    if (step !== 'executing' || !positionTransactions) return;
+    if (transactionDetails.receipt) {
+      setCompletedTxHashes((prev) => [...prev, transactionDetails.receipt!.hash]);
+      clearTransaction();
+      if (currentTxIndex + 1 >= positionTransactions.transactions.length) {
+        handleFinishPosition();
+      } else {
+        setCurrentTxIndex((prev) => prev + 1);
+      }
+    } else if (transactionDetails.error) {
+      setTransactionError(transactionDetails.error.message || 'Transaction failed');
+    }
+  }, [step, positionTransactions, transactionDetails, currentTxIndex, clearTransaction, handleFinishPosition]);
+
+  React.useEffect((): void => {
+    if (step === 'executing' && positionTransactions && currentTxIndex < positionTransactions.transactions.length && !transactionDetails.transactionPromise && !transactionDetails.receipt && !transactionError) {
+      executeNextTransaction();
+    }
+  }, [step, positionTransactions, currentTxIndex, transactionDetails, transactionError, executeNextTransaction]);
+
+  const getTransactionLabel = React.useCallback((index: number): string => {
+    const labels = ['Approve collateral', 'Supply collateral', 'Borrow USDC', 'Approve USDC', 'Deposit to vault'];
+    return labels[index] || `Transaction ${index + 1}`;
+  }, []);
 
   const handleBack = React.useCallback((): void => {
     if (step === 'ltv') setStep('collateral');
@@ -202,7 +299,7 @@ export function SetupPage(): React.ReactElement {
           {isLoadingCollaterals ? (
             <Stack direction={Direction.Vertical} childAlignment={Alignment.Center} shouldAddGutters={true}>
               <Text>Loading collaterals...</Text>
-              <Text variant='note'>Fetching live rates from Morpho & Yo.xyz</Text>
+              <Text variant='note'>Fetching live rates from Morpho & 40acres</Text>
             </Stack>
           ) : (
             <Stack direction={Direction.Vertical} shouldAddGutters={true} isFullWidth={true}>
@@ -228,7 +325,7 @@ export function SetupPage(): React.ReactElement {
                       <Stack direction={Direction.Vertical} childAlignment={Alignment.Start}>
                         <Text variant='bold'>{collateral.symbol}</Text>
                         {hasBalance ? (
-                          <Text variant='note'>{`Balance: ${formatBalance(assetBalance.balance, collateral.decimals)}`}</Text>
+                          <Text variant='note'>{`Balance: ${formatBalance(assetBalance.balance, collateral.decimals)} ($${assetBalance.balanceUsd.toFixed(2)})`}</Text>
                         ) : (
                           <Text variant='note'>No balance</Text>
                         )}
@@ -247,18 +344,10 @@ export function SetupPage(): React.ReactElement {
                 );
               })}
               {marketData && (
-                <Box variant='card' isFullWidth={true}>
+                <Box isFullWidth={true}>
                   <Stack direction={Direction.Horizontal} contentAlignment={Alignment.Center} shouldAddGutters={true} paddingHorizontal={PaddingSize.Default} paddingVertical={PaddingSize.Narrow}>
-                    <Text variant='note'>
-                      Yield vault:
-                      {' '}
-                      {marketData.yieldVaultName}
-                    </Text>
-                    <Stack.Item growthFactor={1} shrinkFactor={1} />
-                    <Text variant='note-success'>
-                      {(marketData.yieldApy * 100).toFixed(2)}
-                      % APY
-                    </Text>
+                    <Text variant='default'>{`Yield vault: ${marketData.yieldVaultName}`}</Text>
+                    <Text variant='default-success'>{`${(marketData.yieldApy * 100).toFixed(2)}% APY`}</Text>
                   </Stack>
                 </Box>
               )}
@@ -321,16 +410,14 @@ export function SetupPage(): React.ReactElement {
               </Box>
             )}
             <Text variant='bold'>{selectedCollateral.symbol}</Text>
-            <Stack.Item growthFactor={1} shrinkFactor={1} />
             {selectedCollateralBalance && (
-              <Stack direction={Direction.Horizontal} childAlignment={Alignment.Center} shouldAddGutters={true}>
-                <Text variant='note'>
-                  Balance:
-                  {' '}
-                  {formatBalance(selectedCollateralBalance.balance, selectedCollateral.decimals)}
-                </Text>
-                <Button variant='tertiary-small' text='Max' onClicked={handleMaxClicked} isEnabled={selectedCollateralBalance.balance > 0n} />
-              </Stack>
+              <Stack.Item growthFactor={1} shrinkFactor={1}>
+                <Stack direction={Direction.Horizontal} childAlignment={Alignment.Center} shouldAddGutters={true}>
+                  <Text variant='note'>{`Balance: ${formatBalance(selectedCollateralBalance.balance, selectedCollateral.decimals)} ($${selectedCollateralBalance.balanceUsd.toFixed(2)})`}</Text>
+                  <Stack.Item growthFactor={1} shrinkFactor={1} />
+                  <Button variant='tertiary-small' text='Max' onClicked={handleMaxClicked} isEnabled={selectedCollateralBalance.balance > 0n} />
+                </Stack>
+              </Stack.Item>
             )}
           </Stack>
           <SingleLineInput
@@ -341,7 +428,7 @@ export function SetupPage(): React.ReactElement {
             inputWrapperVariant='dialogInput'
           />
           <Spacing />
-          <Box variant='card' isFullWidth={true}>
+          <Box isFullWidth={true}>
             <Stack direction={Direction.Vertical} shouldAddGutters={true} paddingHorizontal={PaddingSize.Default} paddingVertical={PaddingSize.Default}>
               <Text variant='note'>Summary</Text>
               <Stack direction={Direction.Horizontal} contentAlignment={Alignment.Start}>
@@ -352,18 +439,12 @@ export function SetupPage(): React.ReactElement {
               <Stack direction={Direction.Horizontal} contentAlignment={Alignment.Start}>
                 <Text>Target LTV:</Text>
                 <Stack.Item growthFactor={1} shrinkFactor={1} />
-                <Text variant='bold'>
-                  {(targetLtv * 100).toFixed(0)}
-                  %
-                </Text>
+                <Text variant='bold'>{`${(targetLtv * 100).toFixed(0)}%`}</Text>
               </Stack>
               <Stack direction={Direction.Horizontal} contentAlignment={Alignment.Start}>
                 <Text>Est. USDC Borrow:</Text>
                 <Stack.Item growthFactor={1} shrinkFactor={1} />
-                <Text variant='bold'>
-                  $
-                  {calculateBorrowAmount()}
-                </Text>
+                <Text variant='bold'>{`$${calculateBorrowAmount()}`}</Text>
               </Stack>
               <Stack direction={Direction.Horizontal} contentAlignment={Alignment.Start}>
                 <Text>Borrow APY:</Text>
@@ -373,11 +454,7 @@ export function SetupPage(): React.ReactElement {
                 </Text>
               </Stack>
               <Stack direction={Direction.Horizontal} contentAlignment={Alignment.Start}>
-                <Text>
-                  Yield APY (
-                  {marketData?.yieldVaultName ?? 'Yo'}
-                  ):
-                </Text>
+                <Text>{`Yield APY (${marketData?.yieldVaultName ?? '40acres'}):`}</Text>
                 <Stack.Item growthFactor={1} shrinkFactor={1} />
                 <Text variant='bold'>
                   {marketData ? `${(marketData.yieldApy * 100).toFixed(2)}%` : '~8%'}
@@ -414,21 +491,25 @@ export function SetupPage(): React.ReactElement {
         <Stack direction={Direction.Vertical} childAlignment={Alignment.Center} shouldAddGutters={true} maxWidth='400px' isFullWidth={true}>
           <Text variant='header3' alignment={TextAlignment.Center}>Connect Telegram</Text>
           <Spacing />
-          <Text alignment={TextAlignment.Center}>
-            BorrowBot monitors your position 24/7 and automatically adjusts your loan to prevent liquidation. Telegram notifications are required so you stay informed about important actions taken on your behalf.
-          </Text>
+          <Text alignment={TextAlignment.Center}>BorrowBot monitors your position 24/7 and automatically adjusts your loan to prevent liquidation. Telegram notifications are required so you stay informed about important actions taken on your behalf.</Text>
           <Spacing />
-          <Text alignment={TextAlignment.Center} variant='note'>
-            You will receive alerts for: position adjustments, LTV warnings, yield updates, and any actions requiring your attention.
-          </Text>
+          <Text alignment={TextAlignment.Center} variant='note'>You will receive alerts for: position adjustments, LTV warnings, yield updates, and any actions requiring your attention.</Text>
           <Spacing />
-          <SingleLineInput
-            inputType={InputType.Text}
-            value={telegramHandle}
-            onValueChanged={setTelegramHandle}
-            placeholderText='@yourusername'
-            inputWrapperVariant='dialogInput'
-          />
+          {telegramChatId ? (
+            <Box width='100%'>
+              <Stack direction={Direction.Horizontal} childAlignment={Alignment.Center} shouldAddGutters={true} isFullWidth={true}>
+                <Text alignment={TextAlignment.Left}>✓ Telegram connected</Text>
+              </Stack>
+            </Box>
+          ) : (
+            <Button
+              variant='secondary'
+              text='Connect Telegram'
+              onClicked={handleConnectTelegram}
+              isFullWidth={true}
+              isLoading={isTelegramConnecting}
+            />
+          )}
           <Spacing />
           <Stack direction={Direction.Horizontal} shouldAddGutters={true} isFullWidth={true}>
             <Button variant='secondary' text='Back' onClicked={handleBack} />
@@ -439,10 +520,55 @@ export function SetupPage(): React.ReactElement {
                 onClicked={handleCreatePosition}
                 isFullWidth={true}
                 isLoading={isLoading}
-                isEnabled={!!telegramHandle.trim()}
+                isEnabled={!!telegramChatId}
               />
             </Stack.Item>
           </Stack>
+        </Stack>
+      )}
+
+      {step === 'executing' && positionTransactions && (
+        <Stack direction={Direction.Vertical} childAlignment={Alignment.Center} shouldAddGutters={true} maxWidth='400px' isFullWidth={true}>
+          <Text variant='header3' alignment={TextAlignment.Center}>Creating Position</Text>
+          <Spacing />
+          <Text alignment={TextAlignment.Center}>Please confirm each transaction in your wallet to complete the position setup.</Text>
+          <Spacing variant={PaddingSize.Wide} />
+          {positionTransactions.transactions.map((tx: TransactionCall, index: number) => (
+            // eslint-disable-next-line react/no-array-index-key
+            <Stack key={`tx-${index}`} direction={Direction.Horizontal} shouldAddGutters={true} isFullWidth={true} childAlignment={Alignment.Center}>
+              <Box variant='rounded' shouldClipContent={true} width='24px' height='24px'>
+                {index < completedTxHashes.length ? (
+                  <KibaIcon iconId='ion-checkmark-circle' variant='small' />
+                ) : index === currentTxIndex && transactionDetails.transactionPromise ? (
+                  <LoadingSpinner variant='small' />
+                ) : (
+                  <Text>{index + 1}</Text>
+                )}
+              </Box>
+              <Stack.Item growthFactor={1} shrinkFactor={1}>
+                <Text>{getTransactionLabel(index)}</Text>
+              </Stack.Item>
+              {index < completedTxHashes.length && (
+                <Link text='View' target={`https://basescan.org/tx/${completedTxHashes[index]}`} />
+              )}
+            </Stack>
+          ))}
+          {transactionError && (
+            <React.Fragment>
+              <Spacing />
+              <Text variant='error' alignment={TextAlignment.Center}>{transactionError}</Text>
+              <Spacing />
+              <Button
+                variant='secondary'
+                text='Retry'
+                onClicked={() => {
+                  setTransactionError(null);
+                  clearTransaction();
+                  executeNextTransaction();
+                }}
+              />
+            </React.Fragment>
+          )}
         </Stack>
       )}
     </Stack>

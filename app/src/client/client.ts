@@ -86,4 +86,36 @@ export class MoneyHackClient extends ServiceClient {
     const response = await this.makeRequest(method, path, request, Endpoints.GetWalletResponse, this.getHeaders(authToken));
     return response.wallet;
   };
+
+  public getPositionTransactions = async (userAddress: string, collateralAssetAddress: string, collateralAmount: bigint, targetLtv: number, authToken: string): Promise<Resources.PositionTransactions> => {
+    const method = RestMethod.POST;
+    const path = `v1/users/${userAddress}/position/transactions`;
+    const request = new Endpoints.GetPositionTransactionsRequest(collateralAssetAddress, collateralAmount.toString(), targetLtv);
+    const response = await this.makeRequest(method, path, request, Endpoints.GetPositionTransactionsResponse, this.getHeaders(authToken));
+    return response.positionTransactions;
+  };
+
+  public getTelegramLoginUrl = async (userAddress: string, authToken: string): Promise<string> => {
+    const method = RestMethod.GET;
+    const path = `v1/users/${userAddress}/telegram/login-url`;
+    const request = new Endpoints.TelegramLoginUrlRequest();
+    const response = await this.makeRequest(method, path, request, Endpoints.TelegramLoginUrlResponse, this.getHeaders(authToken));
+    return response.loginUrl;
+  };
+
+  public verifyTelegramCode = async (userAddress: string, secretCode: string, authData: Record<string, string | null>, authToken: string): Promise<Resources.UserConfig> => {
+    const method = RestMethod.POST;
+    const path = `v1/users/${userAddress}/telegram/verify-code`;
+    const request = new Endpoints.VerifyTelegramCodeRequest(secretCode, authData);
+    const response = await this.makeRequest(method, path, request, Endpoints.VerifyTelegramCodeResponse, this.getHeaders(authToken));
+    return response.userConfig;
+  };
+
+  public disconnectTelegram = async (userAddress: string, authToken: string): Promise<Resources.UserConfig> => {
+    const method = RestMethod.DELETE;
+    const path = `v1/users/${userAddress}/telegram`;
+    const request = new Endpoints.DisconnectTelegramRequest();
+    const response = await this.makeRequest(method, path, request, Endpoints.DisconnectTelegramResponse, this.getHeaders(authToken));
+    return response.userConfig;
+  };
 }

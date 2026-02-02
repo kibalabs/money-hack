@@ -29,8 +29,8 @@
 - **Market Selection**: Automatically select best market by liquidity for collateral/USDC pairs
 - **Supported Methods**: `get_market()`, `get_borrow_apy()`, `get_max_ltv()`, `get_markets_for_collateral()`
 
-#### Yo.xyz Vault Integration (yo/)
-- **YoClient**: On-chain vault interaction via ERC-4626 ABI
+#### 40acres Vault Integration (forty_acres/)
+- **FortyAcresClient**: On-chain vault interaction via ERC-4626 ABI
 - **Vault Info**: Fetch vault name, symbol, asset, decimals, total assets
 - **APY Calculation**: Calculate real APY from share price oracle updates over time
 - **Supported Methods**: `get_vault_info()`, `get_yield_apy()`
@@ -59,19 +59,61 @@
 
 ---
 
-### 🔲 Phase 4: On-Chain Position Creation
+### ✅ Phase 4: On-Chain Position Creation (Complete)
 
 **Goal**: Actually execute supply/borrow/deposit transactions on-chain
 
+**Implementation Notes (File-Based Approach):**
+- Using file store instead of database to avoid networking complexity
+- Transactions are built by backend, signed by user in frontend via @kibalabs/web3-react
+- Market params (oracle, IRM, LLTV) fetched from Morpho GraphQL API
+
 #### Backend
-- **Morpho Supply**: Supply collateral to Morpho market
-- **Morpho Borrow**: Borrow USDC against collateral
-- **Yo Vault Deposit**: Deposit borrowed USDC into Yo vault
-- **Transaction Batching**: Compose multi-step transactions (supply → borrow → deposit)
+- **✅ TransactionBuilder**: Encodes Morpho supply/borrow + 40acres vault deposit transactions
+- **✅ MorphoClient**: Fetches market params including oracle, IRM, LLTV from GraphQL
+- **✅ GET /v1/users/{addr}/position/transactions endpoint**: Returns list of TransactionCall objects
+- **✅ Morpho Supply**: Supply collateral to Morpho market (encoded tx)
+- **✅ Morpho Borrow**: Borrow USDC against collateral (encoded tx)
+- **✅ 40acres Vault Deposit**: Deposit borrowed USDC into 40acres vault (encoded tx)
+- **✅ Transaction Batching**: 5 transactions (approve collateral, supply, borrow, approve USDC, deposit)
 
 #### Frontend
-- **Transaction Flow**: Approval + batch transaction signing
-- **Transaction Status**: Pending/confirmed states, transaction hash display
+- **✅ getPositionTransactions API method**: Fetches transaction list from backend
+- **✅ Transaction Signing**: Sequential signing via useWeb3Transaction + accountSigner
+- **✅ Transaction Flow**: Progress UI showing each step with checkmarks/spinners
+- **✅ Transaction Status**: Pending/confirmed states with Basescan links
+- **✅ Error Handling**: Retry button on failed transactions
+- **✅ USD Balance Display**: Shows wallet balance in USD value alongside token amount
+
+---
+
+### ✅ Phase 4B: Telegram OAuth Integration (Complete)
+
+**Goal**: Implement proper Telegram OAuth-style connection instead of just username input
+
+#### Backend
+- **✅ TelegramClient**: OAuth-style authentication with secret code verification
+  - Generates login URL with secret code
+  - Verifies Telegram auth data via HMAC SHA256 signature
+  - Links wallet address to Telegram chat_id for messaging
+  - Webhook/webhook configuration support
+
+- **✅ API Endpoints**:
+  - `GET /v1/users/{userAddress}/telegram/login-url` → Returns OAuth login URL
+  - `POST /v1/users/{userAddress}/telegram/verify-code` → Verifies secret + auth data
+  - `DELETE /v1/users/{userAddress}/telegram` → Removes Telegram connection
+
+- **✅ UserConfig Updates**:
+  - Added `telegram_chat_id` (required for sending messages)
+  - Kept `telegram_handle` (optional, for display)
+  - File-based persistence
+
+#### Frontend
+- **✅ OAuth Flow**: User clicks "Connect Telegram" button → Opens Telegram bot OAuth
+- **✅ Callback Handling**: Parses telegram auth data from URL query params
+- **✅ SetupPage Integration**: Telegram connection in the 4-step setup wizard
+- **✅ UI Feedback**: Shows "Telegram connected ✓" after successful linking
+- **✅ Client Methods**: getTelegramLoginUrl, verifyTelegramCode, disconnectTelegram
 
 ---
 
@@ -85,7 +127,7 @@
 
 #### Backend
 - **Safe Withdrawal Calculation**: Compute max withdrawable amount while maintaining healthy LTV
-- **Yo Vault Withdraw**: Withdraw USDC from vault
+- **40acres Vault Withdraw**: Withdraw USDC from vault
 - **Morpho Repay**: Repay USDC debt
 - **Morpho Withdraw Collateral**: Return collateral to user
 
@@ -108,13 +150,17 @@
 **Goal**: Keep users informed of position changes
 
 #### Backend
-- **Telegram Bot Setup**: Create bot via BotFather
-- **User Linking**: OAuth-style flow to link wallet address to Telegram chat_id
+- **Notification Service**: Send messages via Telegram Bot API to linked chat_id
 - **Notification Types**:
   - Position opened confirmation
   - LTV adjustment alerts (auto-repay/auto-borrow)
   - Critical warnings (LTV approaching liquidation)
   - Position closed confirmation
+  - Yield updates and earnings summaries
+
+#### Integration
+- Notifications triggered from background worker (Phase 6)
+- Graceful degradation if user hasn't connected Telegram
 
 ---
 
@@ -124,37 +170,32 @@
 
 #### Smart Contracts
 - **AgentWalletKit Integration**: Create agent wallet per user
-- **Adapter Registry**: Restrict agent to only approved protocol interactions (Morpho, Yo vault)
+- **Adapter Registry**: Restrict agent to only approved protocol interactions (Morpho, 40acres vault)
 - **User Approval**: User signs UserOp to authorize agent actions
 
 ---
 
-## Implementation Notes
+## Implementation Complete ✓
 
-### Telegram Integration TODO
-The current implementation only collects the user's Telegram handle as text input. For production, we need to implement proper Telegram bot integration similar to agent-hack:
+**Phase 4**: Full on-chain position creation with sequential transaction signing
+**Phase 4B**: Complete Telegram OAuth integration with SetupPage flow
 
-1. **Create Telegram Bot** via BotFather
-2. **Implement OAuth-style flow**: User clicks "Connect Telegram" → Opens Telegram → Authenticates with bot → Bot sends verification code or deep-links back
-3. **Store chat_id**: The bot needs the user's Telegram chat_id (not just username) to send messages
-4. **Backend integration**:
-   - API endpoint to initiate Telegram connection
-   - Webhook or polling to receive Telegram updates
-   - Store mapping: wallet_address → telegram_chat_id
-5. **Send notifications**: Use Telegram Bot API to send formatted messages for position updates, alerts, etc.
-
-Reference: See agent-hack's Telegram integration for implementation patterns.
+### What's Next?
+- **Phase 5**: Position management (withdrawals, closing)
+- **Phase 6**: Autonomous LTV monitoring and adjustments via background worker
+- **Phase 7**: Telegram message notifications via Bot API
+- **Phase 8**: ERC-4337 agent wallet for decentralized autonomous execution
 
 ---
 
 ## Executive Summary
-BorrowBot is an MVP onchain agent built with AgentWalletKit that enables users to deposit collateral (WETH, WBTC, or cbBTC) on Base, secure an overcollateralized USDC loan via Morpho, and earn ~7-10% yield by depositing the borrowed USDC into the Gauntlet USD Alpha vault. The agent autonomously monitors and adjusts the loan's LTV ratio for safety and profitability, sending Telegram notifications for updates and urgent actions. Users can withdraw USDC partially or fully, with safeguards to maintain position health. All actions are batched via Li.Fi for efficiency, with ENS storing user preferences and optional Uniswap v4 swaps. This demo-focused project emphasizes reliability, transparency, and composability for the ETHGlobal HackMoney 2026 hackathon, targeting Uniswap, Li.Fi, and ENS prize categories.
+BorrowBot is an MVP onchain agent built with AgentWalletKit that enables users to deposit collateral (WETH or cbBTC) on Base, secure an overcollateralized USDC loan via Morpho, and earn ~7-10% yield by depositing the borrowed USDC into 40acres vault. The agent autonomously monitors and adjusts the loan's LTV ratio for safety and profitability, sending Telegram notifications for updates and urgent actions. Users can withdraw USDC partially or fully, with safeguards to maintain position health. All actions are signed by the user with sequential transaction flows. This demo-focused project emphasizes reliability, transparency, and composability for DeFi yield optimization.
 
 ## Background Information
 ### Key Onchain Concepts
 - **Overcollateralized Lending**: In DeFi protocols like Morpho, users deposit assets (collateral) worth more than the borrowed amount to secure loans. The Loan-to-Value (LTV) ratio (borrow amount / collateral value) must stay below a threshold (e.g., 75-85%) to avoid liquidation, where the protocol sells collateral to repay the loan if LTV exceeds the liquidation threshold (e.g., 90%). Collateral and borrow values are determined by onchain oracles (e.g., Chainlink) for real-time pricing.
-- **Yield Vaults**: Smart contracts like Gauntlet USD Alpha aggregate and optimize yield on stablecoins (e.g., USDC) by lending across protocols, offering APY (e.g., 7-10%) net of fees and risks. Deposits earn interest automatically, with withdrawals possible anytime.
-- **Onchain Agents**: Using frameworks like AgentWalletKit, agents are smart contract wallets (via ERC-4337) that execute predefined actions securely. Adapters restrict interactions to approved protocols (e.g., Morpho supply/borrow, Gauntlet deposit/withdraw), ensuring transparency and preventing unauthorized actions.
+- **Yield Vaults**: Smart contracts like 40acres vault aggregate and optimize yield on stablecoins (e.g., USDC) by lending across protocols, offering APY (e.g., 7-10%) net of fees and risks. Deposits earn interest automatically, with withdrawals possible anytime.
+- **Onchain Agents**: Using frameworks like AgentWalletKit, agents are smart contract wallets (via ERC-4337) that execute predefined actions securely. Adapters restrict interactions to approved protocols (e.g., Morpho supply/borrow, 40acres vault deposit/withdraw), ensuring transparency and preventing unauthorized actions.
 - **Batching and Orchestration**: Tools like Li.Fi compose multi-step transactions (e.g., supply collateral + borrow + deposit to vault) into one user-signed batch, reducing gas and complexity.
 - **ENS (Ethereum Name Service)**: Beyond name resolution, ENS text records store arbitrary data (e.g., user preferences like LTV thresholds or Telegram handles) onchain, enabling composable, decentralized configurations.
 - **Monitoring and Notifications**: Offchain scripts poll onchain state (e.g., Morpho health factor) and trigger agent actions via UserOps. Integrations like Telegram bots provide offchain alerts for user awareness without constant app interaction.
@@ -163,40 +204,46 @@ BorrowBot is an MVP onchain agent built with AgentWalletKit that enables users t
 These concepts enable trustless, automated DeFi strategies while mitigating risks like liquidation through proactive adjustments.
 
 ## App Description
-BorrowBot is a web-based dApp (built with Next.js) that interfaces with an onchain agent powered by AgentWalletKit on Base. Users connect their wallet to deposit collateral, open a lending position, and earn yield on borrowed USDC. The agent handles backend automation: opening positions, monitoring LTV, adjusting borrows/repays, and notifying via Telegram. The app provides a simple dashboard for viewing positions and initiating actions like withdrawals or unwinds. Background processes run via an offchain Node.js script for monitoring, ensuring the agent executes onchain only when needed. Security is enforced through AgentWalletKit's adapter registry, limiting interactions to Morpho, Gauntlet, Li.Fi, Uniswap v4, and ENS. The MVP supports three collaterals, focuses on USDC borrows/yields, and prioritizes safe, profitable operations.
+BorrowBot is a web-based dApp (built with React) that enables users to deposit collateral, open lending positions, and earn yield on borrowed USDC. The app provides a 4-step setup wizard for new positions: connect wallet, connect Telegram (via OAuth), select collateral, and enter LTV. Backend handles position creation with sequential transaction signing. A simple dashboard shows position details and withdrawal controls. Background automation monitors positions for LTV adjustments and sends Telegram notifications. Security relies on file-based storage and user-controlled transaction signing. The MVP supports WETH and cbBTC collaterals, focuses on USDC borrows/yields, and prioritizes safe, profitable operations.
 
 ## User Screens and Background Operations
 ### User Screens (Web App)
-The app features a minimal, wallet-connected interface for user interactions:
-1. **Setup Screen**: Connect wallet (e.g., via WalletConnect). Input Telegram handle (stored in ENS text record "telegram_handle:username"). Select collateral (WETH, WBTC, or cbBTC from dropdown). Enter target LTV (e.g., 75%, stored in ENS "preferred_ltv:75"). Deposit button approves and transfers collateral to the agent wallet.
-2. **Dashboard Screen**: Real-time view of position details (fetched onchain): Collateral type/value, borrow amount, current LTV, health factor, vault balance, accrued yield, estimated APY. Buttons for "Withdraw USDC" (slider with max safe amount), "Unwind Position" (full close), and "Refresh" for updates.
+The app features a wallet-connected interface with a 4-step setup wizard and dashboard:
+1. **Setup Step 1 - Collateral**: Connect wallet (e.g., via WalletConnect). Select collateral (WETH or cbBTC from dropdown). View available balance with USD value.
+2. **Setup Step 2 - LTV**: Choose target LTV (65% conservative to 80% aggressive). Shows risk description for each level.
+3. **Setup Step 3 - Deposit Amount**: Enter deposit amount. View projected borrow amount and yield estimate. "Max" button fills with available balance.
+4. **Setup Step 4 - Telegram**: Click "Connect Telegram" button → Opens Telegram OAuth flow → User authenticates with bot → Returns to app with chat_id linked. Displays "Telegram connected ✓" when successful.
+5. **Position Creation**: Final "Create Position" button triggers 5 sequential transactions (approve, supply, borrow, approve USDC, deposit to vault). Progress UI shows each step with checkmarks and spinners.
+6. **Dashboard Screen**: Real-time view of position (fetched onchain): Collateral type/value, borrow amount, current LTV, health factor, vault balance, accrued yield, estimated APY. Buttons for "Withdraw USDC" (slider with max safe amount), "Unwind Position" (full close), and "Refresh" for updates.
+
 3. **Withdrawal Screen**: Modal from dashboard; user inputs USDC amount. Displays projected post-withdrawal LTV and warnings if risky. Confirm triggers agent execution.
 4. **Notifications Link**: Simple page to confirm Telegram setup and view recent alerts (pulled from app logs for demo).
 
 User experience is hands-off post-setup: App for active management, Telegram for passive updates.
 
 ### Background Operations
-- **Onchain Execution**: All agent actions (e.g., supply to Morpho, borrow USDC, deposit to Gauntlet) use AgentWalletKit adapters for security. Batched via Li.Fi Composer for multi-step efficiency. ENS reads preferences onchain (e.g., view functions to fetch text records). Uniswap v4 used only if non-USDC swaps needed (rare in MVP).
-- **Offchain Monitoring**: Node.js script runs periodically (every 5-10 min, or 2 min post-withdrawal). Queries Morpho view functions (e.g., getPosition for LTV/health) using Web3.js. If adjustment threshold met (LTV >75% or <65%), script signs and submits UserOp to trigger agent (e.g., withdraw from Gauntlet + repay to Morpho). Profitability checked via rate queries (Morpho borrow APR vs. Gauntlet APY).
+- **Onchain Execution**: All agent actions (e.g., supply to Morpho, borrow USDC, deposit to 40acres vault) use AgentWalletKit adapters for security. Batched via Li.Fi Composer for multi-step efficiency. ENS reads preferences onchain (e.g., view functions to fetch text records). Uniswap v4 used only if non-USDC swaps needed (rare in MVP).
+- **Offchain Monitoring**: Node.js script runs periodically (every 5-10 min, or 2 min post-withdrawal). Queries Morpho view functions (e.g., getPosition for LTV/health) using Web3.js. If adjustment threshold met (LTV >75% or <65%), script signs and submits UserOp to trigger agent (e.g., withdraw from 40acres vault + repay to Morpho). Profitability checked via rate queries (Morpho borrow APR vs. 40acres vault APY).
 - **Notifications**: Integrated Telegram bot (using Telegram API) hooked to agent events and monitor script. Sends formatted messages for actions, summaries, and alerts. Handles stored in ENS for user-specific routing.
 - **Safeguards**: LTV buffers (e.g., 10%) prevent over-borrowing. Adjustments skipped if unprofitable or insufficient funds, triggering user alerts instead.
 
 ## Example User/Agent Flows
-Below are detailed flows illustrating user interactions, agent actions, and background processes. Assumptions: Base chain, Morpho for lending (LTV limits: WETH ~75-85%, WBTC/cbBTC ~70-80%), Gauntlet for yield (~7-10% APY), borrow APR ~2-5%.
+Below are detailed flows illustrating user interactions, position creation, and future autonomous management. Assumptions: Base chain, Morpho for lending (LTV limits: WETH ~75-85%, cbBTC ~70-80%), 40acres vault for yield (~7-10% APY), borrow APR ~2-5%).
 
-### Flow 1: Deposit WBTC to Earn Yield on USDC
-- **User Actions**: In app, connect wallet, select WBTC, input Telegram handle and 75% LTV, deposit $100k WBTC equivalent.
-- **Agent/Background**: Creates agent wallet if needed. Batches via Li.Fi: Supply WBTC to Morpho (supply call), borrow $75k USDC (borrow call at 75% LTV), deposit to Gauntlet (deposit call). Telegram: "Position opened: WBTC $100k, USDC borrow $75k, LTV 75%, vault earning ~8%."
-- **Scenario: Collateral Price Drops (Agent Covers Loan)**: Offchain script detects WBTC drop to $90k (LTV ~83%). Checks profitability (yield 8% > borrow 3% + fees). Agent executes: Withdraw $5k USDC from Gauntlet, repay to Morpho. Telegram: "Alert: LTV 83%. Repaid $5k; new LTV 75%."
-- **Scenario: Collateral Price Rises (Agent Borrows More for Yield)**: WBTC rises to $110k (LTV ~68%). Script triggers borrow $5k more USDC, deposit to Gauntlet (profitable: extra yield > interest). Telegram: "Update: Borrowed $5k extra; LTV 75%; yield boost +$0.25/day."
-- **User/Agent Close**: User clicks "Unwind" in app. Agent withdraws all USDC from Gauntlet, repays Morpho, returns WBTC. Telegram: "Closed: Returned WBTC + yield minus fees."
+### Flow 1: Deposit cbBTC to Earn Yield on USDC
+- **User Actions**: In app, 4-step setup: (1) connect wallet, select cbBTC, (2) choose 75% LTV, (3) enter $100k deposit, (4) connect Telegram via OAuth. Click "Create Position".
+- **Frontend/Backend**: Builds and signs 5 transactions sequentially: Approve cbBTC, supply to Morpho, borrow $75k USDC, approve USDC, deposit to 40acres vault. Progress UI shows each step with checkmark/spinner. All 5 signed by user.
+- **Notifications**: Telegram: "Position opened: cbBTC $100k, USDC borrow $75k, LTV 75%, vault earning ~8%."
+- **Scenario: Collateral Price Drops (Future - Phase 6)**: Offchain script detects cbBTC drop to $90k (LTV ~83%). Checks profitability (yield 8% > borrow 3% + fees). Agent executes: Withdraw $5k USDC from 40acres vault, repay to Morpho. Telegram: "Alert: LTV 83%. Repaid $5k; new LTV 75%."
+- **Scenario: Collateral Price Rises (Future - Phase 6)**: cbBTC rises to $110k (LTV ~68%). Script triggers borrow $5k more USDC, deposit to 40acres vault (profitable: extra yield > interest). Telegram: "Update: Borrowed $5k extra; LTV 75%; yield boost +$0.25/day."
+- **User Close**: User clicks "Unwind" in dashboard. Frontend builds transactions to withdraw all USDC from 40acres vault, repay Morpho, return cbBTC. Telegram: "Closed: Returned cbBTC + yield minus fees."
 
 ### Flow 2: Deposit WETH with USDC Withdrawal
-- **User Actions**: Select WETH, deposit $100k equivalent, set 75% LTV. Position opens as above (borrow $75k USDC to vault).
-- **Agent/Background**: Same as Flow 1 opening. Dashboard shows details.
-- **User Withdrawal**: In app, request $10k USDC. Agent calculates max safe ($20k to keep LTV <85%). Executes: Withdraw $10k from Gauntlet, transfer to user. Telegram: "Withdrew $10k; vault $65k; LTV 75%; yield reduced."
-- **Scenario: Post-Withdrawal Price Drop**: Script detects WETH drop, LTV to 80%. Agent repays $5k using remaining vault. Telegram: "Adjusted: Repaid $5k; LTV 75%."
-- **Scenario: Insufficient Funds for Adjustment**: After more withdrawals (vault low), LTV hits 87%. Agent can't repay fully—skips and alerts. Telegram: "Critical: LTV 87%, low vault. Deposit USDC or add WETH via app."
-- **User/Agent Close**: Similar to Flow 1, with partial repay from remaining vault.
+- **User Actions**: 4-step setup: select WETH, 75% LTV, $100k deposit, connect Telegram. Create position. Position opens as above.
+- **Frontend/Backend**: Dashboard shows collateral value in USD. Sequential transactions create position with USD balance display.
+- **User Withdrawal**: In app dashboard, enter $10k USDC request. Max safe calculated ($20k to keep LTV <85%). Builds and signs withdrawal transactions. Telegram: "Withdrew $10k; vault $65k; LTV 75%; yield reduced."
+- **Scenario: Post-Withdrawal Price Drop (Future - Phase 6)**: Script detects WETH drop, LTV to 80%. Agent repays $5k using remaining vault. Telegram: "Adjusted: Repaid $5k; LTV 75%."
+- **Scenario: Insufficient Funds for Adjustment (Future)**: After more withdrawals (vault low), LTV hits 87%. Agent can't repay fully—skips and alerts. Telegram: "Critical: LTV 87%, low vault. Deposit USDC or add WETH via app."
+- **User Close**: Similar to Flow 1, with partial repay from remaining vault.
 
-These flows demonstrate the agent's autonomy in maintaining profitable, safe positions while keeping users informed via app and Telegram.
+These flows demonstrate the 4-step setup with Telegram OAuth, sequential transaction signing, and future autonomous management keeping users informed.

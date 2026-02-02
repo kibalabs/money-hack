@@ -16,6 +16,8 @@ query ListMarkets($skip: Int!, $chainId: Int!, $collateralAssetAddress: String!,
         symbol
         decimals
       }
+      oracleAddress
+      irmAddress
       state {
         borrowApy
         supplyApy

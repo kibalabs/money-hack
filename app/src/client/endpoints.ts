@@ -240,3 +240,113 @@ export class GetWalletResponse extends ResponseData {
     );
   };
 }
+
+export class GetPositionTransactionsRequest extends RequestData {
+  public constructor(
+    readonly collateralAssetAddress: string,
+    readonly collateralAmount: string,
+    readonly targetLtv: number,
+  ) {
+    super();
+  }
+
+  public toObject = (): RawObject => {
+    return {
+      collateralAssetAddress: this.collateralAssetAddress,
+      collateralAmount: this.collateralAmount,
+      targetLtv: this.targetLtv,
+    };
+  };
+}
+
+export class GetPositionTransactionsResponse extends ResponseData {
+  public constructor(
+    readonly positionTransactions: Resources.PositionTransactions,
+  ) {
+    super();
+  }
+
+  public static fromObject = (obj: RawObject): GetPositionTransactionsResponse => {
+    return new GetPositionTransactionsResponse(
+      Resources.PositionTransactions.fromObject(obj as RawObject),
+    );
+  };
+}
+
+export class TelegramLoginUrlRequest extends RequestData {
+  public constructor() {
+    super();
+  }
+
+  public toObject = (): RawObject => {
+    return {};
+  };
+}
+
+export class TelegramLoginUrlResponse extends ResponseData {
+  public constructor(
+    readonly loginUrl: string,
+  ) {
+    super();
+  }
+
+  public static fromObject = (obj: RawObject): TelegramLoginUrlResponse => {
+    return new TelegramLoginUrlResponse(
+      String(obj.login_url),
+    );
+  };
+}
+
+export class VerifyTelegramCodeRequest extends RequestData {
+  public constructor(
+    readonly secretCode: string,
+    readonly authData: Record<string, string | null>,
+  ) {
+    super();
+  }
+
+  public toObject = (): RawObject => {
+    return {
+      secret_code: this.secretCode,
+      auth_data: this.authData,
+    };
+  };
+}
+
+export class VerifyTelegramCodeResponse extends ResponseData {
+  public constructor(
+    readonly userConfig: Resources.UserConfig,
+  ) {
+    super();
+  }
+
+  public static fromObject = (obj: RawObject): VerifyTelegramCodeResponse => {
+    return new VerifyTelegramCodeResponse(
+      Resources.UserConfig.fromObject(obj.user_config as RawObject),
+    );
+  };
+}
+
+export class DisconnectTelegramRequest extends RequestData {
+  public constructor() {
+    super();
+  }
+
+  public toObject = (): RawObject => {
+    return {};
+  };
+}
+
+export class DisconnectTelegramResponse extends ResponseData {
+  public constructor(
+    readonly userConfig: Resources.UserConfig,
+  ) {
+    super();
+  }
+
+  public static fromObject = (obj: RawObject): DisconnectTelegramResponse => {
+    return new DisconnectTelegramResponse(
+      Resources.UserConfig.fromObject(obj.user_config as RawObject),
+    );
+  };
+}

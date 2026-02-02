@@ -1,10 +1,7 @@
 from datetime import datetime
 
 from pydantic import BaseModel
-
-
-class EmptyRequest(BaseModel):
-    pass
+from pydantic import ConfigDict
 
 
 class AuthToken(BaseModel):
@@ -42,52 +39,10 @@ class Position(BaseModel):
 
 
 class UserConfig(BaseModel):
-    telegram_handle: str | None
-    preferred_ltv: float
-
-
-class GetSupportedCollateralsResponse(BaseModel):
-    collaterals: list[CollateralAsset]
-
-
-class GetUserConfigResponse(BaseModel):
-    user_config: UserConfig
-
-
-class UpdateUserConfigRequest(BaseModel):
-    telegram_handle: str | None
-    preferred_ltv: float
-
-
-class UpdateUserConfigResponse(BaseModel):
-    user_config: UserConfig
-
-
-class CreatePositionRequest(BaseModel):
-    collateral_asset_address: str
-    collateral_amount: str
-    target_ltv: float
-
-
-class CreatePositionResponse(BaseModel):
-    position: Position
-
-
-class GetPositionResponse(BaseModel):
-    position: Position | None
-
-
-class WithdrawRequest(BaseModel):
-    amount: str
-
-
-class WithdrawResponse(BaseModel):
-    position: Position
-    transaction_hash: str
-
-
-class ClosePositionResponse(BaseModel):
-    transaction_hash: str
+    model_config = ConfigDict(populate_by_name=True)
+    telegram_handle: str | None = None
+    telegram_chat_id: int | str | None = None
+    preferred_ltv: float | None = None
 
 
 class CollateralMarketData(BaseModel):
@@ -96,13 +51,6 @@ class CollateralMarketData(BaseModel):
     borrow_apy: float
     max_ltv: float
     market_id: str | None
-
-
-class MarketDataResponse(BaseModel):
-    collateral_markets: list[CollateralMarketData]
-    yield_apy: float
-    yield_vault_address: str
-    yield_vault_name: str
 
 
 class AssetBalance(BaseModel):
@@ -118,5 +66,15 @@ class Wallet(BaseModel):
     asset_balances: list[AssetBalance]
 
 
-class GetWalletResponse(BaseModel):
-    wallet: Wallet
+class TransactionCall(BaseModel):
+    to: str
+    data: str
+    value: str = '0'
+
+
+class PositionTransactionsData(BaseModel):
+    transactions: list[TransactionCall]
+    morpho_address: str
+    vault_address: str
+    estimated_borrow_amount: str
+    needs_approval: bool

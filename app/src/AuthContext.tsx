@@ -1,13 +1,14 @@
 import React from 'react';
 
 import { IMultiAnyChildProps } from '@kibalabs/core-react';
-import { useIsRestoringWeb3Session, useWeb3Account, useWeb3ChainId, useWeb3LoginSignature } from '@kibalabs/web3-react';
+import { useIsRestoringWeb3Session, useWeb3Account, useWeb3ChainId, useWeb3LoginSignature, Web3Signer } from '@kibalabs/web3-react';
 
 interface AuthContextType {
   isWeb3AccountConnecting: boolean;
   isWeb3AccountConnected: boolean;
   isWeb3AccountLoggedIn: boolean;
   accountAddress: string | undefined;
+  accountSigner: Web3Signer | undefined;
   authToken: string | null;
   chainId: number;
   logout: () => void;
@@ -24,6 +25,7 @@ export function AuthProvider(props: AuthProviderProps): React.ReactElement {
   const chainId = useWeb3ChainId();
   const isRestoringWeb3Session = useIsRestoringWeb3Session();
   const accountAddress = account?.address;
+  const accountSigner = account?.signer;
 
   // isWeb3AccountConnecting is true while web3-react is still initializing OR restoring a previous session
   // Note: loginSignature is null (not undefined) when not logged in, so we check for both
@@ -51,6 +53,7 @@ export function AuthProvider(props: AuthProviderProps): React.ReactElement {
     isWeb3AccountConnected,
     isWeb3AccountLoggedIn,
     accountAddress,
+    accountSigner,
     authToken,
     chainId: chainId || 8453,
     logout,
@@ -59,6 +62,7 @@ export function AuthProvider(props: AuthProviderProps): React.ReactElement {
     isWeb3AccountConnected,
     isWeb3AccountLoggedIn,
     accountAddress,
+    accountSigner,
     authToken,
     chainId,
     logout,
