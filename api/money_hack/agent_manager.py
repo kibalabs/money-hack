@@ -345,7 +345,7 @@ class AgentManager(Authorizer):
         )
 
     async def get_telegram_login_url(self, user_address: str) -> tuple[str, str]:
-        loginUrl, secretCode = self.telegramClient.get_login_url()
+        loginUrl, secretCode = await self.telegramClient.get_login_url()
         normalizedAddress = chain_util.normalize_address(user_address)
         await self.fileStore.set(f'telegram_secret:{secretCode}', normalizedAddress)
         return loginUrl, secretCode

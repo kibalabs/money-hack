@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 
@@ -17,6 +18,10 @@ class StoredPosition(BaseModel):
 
 class StoredUserConfig(BaseModel):
     user_config: UserConfig
+
+
+class GenericValue(BaseModel):
+    value: str
 
 
 class FileStore:
@@ -86,7 +91,7 @@ class FileStore:
     async def set(self, key: str, value: str | dict[str, object]) -> None:
         self._ensure_dirs()
         filePath = self.dataDir / f'{key}.json'
-        jsonContent = BaseModel.model_validate(value).model_dump_json() if isinstance(value, dict) else BaseModel.model_validate({'value': value}).model_dump_json()
+        jsonContent = json.dumps(value) if isinstance(value, dict) else GenericValue(value=value).model_dump_json()
         await file_util.write_file(filePath=str(filePath), content=jsonContent)
 
     async def get(self, key: str) -> str | None:
@@ -94,8 +99,12 @@ class FileStore:
         if not filePath.exists():
             return None
         content = await file_util.read_file(filePath=str(filePath))
-        data = BaseModel.model_validate_json(content)
-        return data.value if hasattr(data, 'value') else str(data)
+        try:
+            data = GenericValue.model_validate_json(content)
+        except ValueError:
+            return content
+        else:
+            return data.value
 
     async def delete(self, key: str) -> None:
         filePath = self.dataDir / f'{key}.json'

@@ -40,6 +40,7 @@ class TelegramClient:
         self.origin = origin
         self.baseUrl = 'https://api.telegram.org'
         self.botApiUrl = f'{self.baseUrl}/bot{botToken}'
+        self.botUsername: str = ''
 
     async def send_message(self, chatId: int | str, text: str, parseMode: str = 'MarkdownV2') -> bool:
         url = f'{self.botApiUrl}/sendMessage'
@@ -59,17 +60,23 @@ class TelegramClient:
             return False
         return True
 
-    def get_login_url(self) -> tuple[str, str]:
+    async def get_login_url(self) -> tuple[str, str]:
+        url = f'{self.botApiUrl}/getMe'
+        try:
+            response = await self.requester.get(url=url, timeout=30)
+            responseData: TelegramResponse = TelegramResponse(**response.json())
+        except (ValueError, KeyError, AttributeError) as e:
+            logging.exception(f'[TELEGRAM] Error getting bot info: {e}')
+            raise ValueError(f'Failed to get bot info: {e}')
+        if not responseData.ok:
+            raise ValueError(f'Failed to get bot info: {responseData.description}')
+        if responseData.result is None:
+            raise ValueError('No bot info in response')
+        botUsername = str(responseData.result.get('username', ''))
+        if not botUsername:
+            raise ValueError('Bot username not found in response')
         secretCode = secrets.token_hex(16)
-        botUsername = self._extract_bot_username()
         return f'https://t.me/{botUsername}?start={secretCode}', secretCode
-
-    def _extract_bot_username(self) -> str:
-        if self.botToken.count(':') != 1:
-            raise ValueError('Invalid bot token format')
-        botId, botSecret = self.botToken.split(':')
-        hashValue = hmac.new(botSecret.encode(), botId.encode(), hashlib.sha256).hexdigest()
-        return f'{botId}_{hashValue[:16]}'
 
     async def set_webhook(self, webhookUrl: str) -> bool:
         url = f'{self.botApiUrl}/setWebhook'
