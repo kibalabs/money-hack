@@ -49,6 +49,38 @@ def create_v1_routes(agentManager: AgentManager) -> list[Route]:
         )
         return endpoints.CreatePositionResponse(position=position, agent=agent)
 
+    @json_route(requestType=endpoints.CreateAgentRequest, responseType=endpoints.CreateAgentResponse)
+    @authorize_signature(authorizer=agentManager)
+    async def create_agent(request: KibaApiRequest[endpoints.CreateAgentRequest]) -> endpoints.CreateAgentResponse:
+        userAddress = request.path_params.get('userAddress', '')
+        agent = await agentManager.create_agent(
+            user_address=userAddress,
+            name=request.data.name,
+            emoji=request.data.emoji,
+        )
+        return endpoints.CreateAgentResponse(agent=agent)
+
+    @json_route(requestType=endpoints.GetAgentRequest, responseType=endpoints.GetAgentResponse)
+    @authorize_signature(authorizer=agentManager)
+    async def get_agent(request: KibaApiRequest[endpoints.GetAgentRequest]) -> endpoints.GetAgentResponse:
+        userAddress = request.path_params.get('userAddress', '')
+        agent = await agentManager.get_agent(user_address=userAddress)
+        return endpoints.GetAgentResponse(agent=agent)
+
+    @json_route(requestType=endpoints.DeployAgentRequest, responseType=endpoints.DeployAgentResponse)
+    @authorize_signature(authorizer=agentManager)
+    async def deploy_agent(request: KibaApiRequest[endpoints.DeployAgentRequest]) -> endpoints.DeployAgentResponse:
+        userAddress = request.path_params.get('userAddress', '')
+        agentId = request.path_params.get('agentId', '')
+        position, transactionHash = await agentManager.deploy_agent(
+            user_address=userAddress,
+            agent_id=agentId,
+            collateral_asset_address=request.data.collateral_asset_address,
+            collateral_amount=request.data.collateral_amount,
+            target_ltv=request.data.target_ltv,
+        )
+        return endpoints.DeployAgentResponse(position=position, transaction_hash=transactionHash)
+
     @json_route(requestType=endpoints.WithdrawRequest, responseType=endpoints.WithdrawResponse)
     @authorize_signature(authorizer=agentManager)
     async def withdraw_usdc(request: KibaApiRequest[endpoints.WithdrawRequest]) -> endpoints.WithdrawResponse:
@@ -153,6 +185,9 @@ def create_v1_routes(agentManager: AgentManager) -> list[Route]:
         Route('/v1/wallets/{walletAddress:str}', endpoint=get_wallet, methods=['GET']),
         Route('/v1/users/{userAddress:str}/config', endpoint=get_user_config, methods=['GET']),
         Route('/v1/users/{userAddress:str}/config', endpoint=update_user_config, methods=['POST']),
+        Route('/v1/users/{userAddress:str}/agent', endpoint=get_agent, methods=['GET']),
+        Route('/v1/users/{userAddress:str}/agent', endpoint=create_agent, methods=['POST']),
+        Route('/v1/users/{userAddress:str}/agents/{agentId:str}/deploy', endpoint=deploy_agent, methods=['POST']),
         Route('/v1/users/{userAddress:str}/position', endpoint=get_position, methods=['GET']),
         Route('/v1/users/{userAddress:str}/position', endpoint=create_position, methods=['POST']),
         Route('/v1/users/{userAddress:str}/position/transactions', endpoint=get_position_transactions, methods=['POST']),

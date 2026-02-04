@@ -1,0 +1,137 @@
+.deployCard {
+  background: linear-gradient(135deg, var(--kiba-color-background-clear90), var(--kiba-color-background-clear80));
+  border: 1px solid var(--kiba-color-brand-primary-clear50);
+}
+
+.logoContainer {
+  position: relative;
+  width: 120px;
+  height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  &.animating .logoInner {
+    animation: pulse 2s ease-in-out infinite;
+  }
+
+  &.completed .logoInner {
+    background: var(--kiba-color-brand-primary);
+    transform: scale(1.1);
+  }
+}
+
+.logoInner {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--kiba-color-brand-primary-clear50), var(--kiba-color-brand-primary-clear30));
+  border: 2px solid var(--kiba-color-brand-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+  transition: all 0.3s ease;
+}
+
+.pulseRing {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  border: 2px solid var(--kiba-color-brand-primary);
+  opacity: 0;
+  animation: pulseRing 2s ease-out infinite;
+
+  &.ring1 {
+    animation-delay: 0s;
+  }
+
+  &.ring2 {
+    animation-delay: 1s;
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+}
+
+@keyframes pulseRing {
+  0% {
+    transform: scale(0.8);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scale(1.5);
+    opacity: 0;
+  }
+}
+
+.deployStepIndicator {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--kiba-color-text-clear80);
+  background: transparent;
+  transition: all 0.3s ease;
+
+  &.completed {
+    background: var(--kiba-color-brand-primary);
+    border-color: var(--kiba-color-brand-primary);
+    color: white;
+  }
+
+  &.active {
+    border-color: var(--kiba-color-brand-primary);
+    color: var(--kiba-color-brand-primary);
+  }
+
+  &.pending {
+    opacity: 0.5;
+  }
+}
+
+.tipCard {
+  background: var(--kiba-color-brand-primary-clear90);
+  border: 1px solid var(--kiba-color-brand-primary-clear50);
+}
+
+.actionCard {
+  background: var(--kiba-color-background-clear90);
+  border: 1px solid var(--kiba-color-text-clear90);
+  border-radius: 12px;
+  transition: all 0.2s ease;
+
+  &:hover {
+    border-color: var(--kiba-color-text-clear70);
+  }
+
+  &.actionCardHighlight {
+    background: linear-gradient(135deg, var(--kiba-color-brand-primary-clear95), var(--kiba-color-background-clear90));
+    border-color: var(--kiba-color-brand-primary-clear50);
+
+    &:hover {
+      border-color: var(--kiba-color-brand-primary-clear30);
+    }
+  }
+}
+
+.actionCardIcon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--kiba-color-brand-primary-clear80);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--kiba-color-brand-primary);
+  flex-shrink: 0;
+}

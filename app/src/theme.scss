@@ -43,7 +43,7 @@
   --logo-icon-url: '/assets/icon-noback.svg';
 
   // Box/Card Colors (dark mode)
-  --box-background-color: rgba(0, 20, 10, 0.6);
+  --box-background-color: rgba(20, 10, 0, 0.6);
   --box-border-color: rgba(255, 255, 255, 0.1);
 
   // Accordion hover (dark mode)
@@ -118,5 +118,31 @@
 
   &.error .KibaInputWrapperInner {
     background-color: var(--kiba-color-background);
+  }
+}
+
+.KibaBox {
+  &.card {
+    background-color: var(--box-background-color);
+    border: 1px solid var(--box-border-color);
+    border-radius: var(--kiba-border-radius);
+    box-shadow: none;
+    margin: 0;
+  }
+
+  &.cardSmall {
+    padding: var(--kiba-padding) var(--kiba-padding-wide);
+  }
+
+  &.success {
+    background-color: var(--kiba-color-success-clear90);
+    border-color: var(--kiba-color-success-clear50);
+    border-width: 1px;
+  }
+
+  &.warning {
+    background-color: var(--kiba-color-warning-clear90);
+    border-color: var(--kiba-color-warning-clear50);
+    border-width: 1px;
   }
 }

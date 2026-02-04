@@ -68,7 +68,8 @@ export function SetupPage(): React.ReactElement {
       }
     };
     handleTelegramCallback();
-  }, [accountAddress, authToken, moneyHackClient, toastManager]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountAddress, authToken]);
 
   React.useEffect(() => {
     const loadCollaterals = async (): Promise<void> => {
@@ -103,7 +104,8 @@ export function SetupPage(): React.ReactElement {
       }
     };
     loadCollaterals();
-  }, [accountAddress, authToken, moneyHackClient, toastManager]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountAddress, authToken]);
 
   const getCollateralMarketData = React.useCallback((collateralAddress: string): CollateralMarketData | null => {
     if (!marketData) return null;

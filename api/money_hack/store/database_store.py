@@ -27,7 +27,7 @@ class DatabaseStore:
     async def get_user(self, userId: str) -> User | None:
         return await UsersRepository.get_one_or_none(
             database=self.database,
-            idValue=userId,
+            fieldFilters=[UUIDFieldFilter(fieldName='userId', eq=userId)],
         )
 
     async def get_user_by_wallet(self, walletAddress: str) -> User | None:
@@ -81,7 +81,7 @@ class DatabaseStore:
     async def get_agent(self, agentId: str) -> Agent | None:
         return await AgentsRepository.get_one_or_none(
             database=self.database,
-            idValue=agentId,
+            fieldFilters=[UUIDFieldFilter(fieldName='agentId', eq=agentId)],
         )
 
     async def get_agent_by_id(self, agentId: str) -> Agent | None:
@@ -102,7 +102,7 @@ class DatabaseStore:
         )
         return next((a for a in agents if a.agentIndex == agentIndex), None)
 
-    async def create_agent(self, userId: str, name: str, emoji: str, ensName: str | None = None) -> Agent:
+    async def create_agent(self, userId: str, name: str, emoji: str, walletAddress: str, ensName: str | None = None) -> Agent:
         existingAgents = await self.get_agents_by_user(userId=userId)
         agentIndex = len(existingAgents)
         return await AgentsRepository.create(
@@ -111,6 +111,7 @@ class DatabaseStore:
             name=name,
             emoji=emoji,
             agentIndex=agentIndex,
+            walletAddress=walletAddress,
             ensName=ensName,
         )
 

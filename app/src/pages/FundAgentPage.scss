@@ -1,0 +1,47 @@
+.ltvCard {
+  width: 100%;
+  padding: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  border: 1px solid var(--kiba-color-text-clear80);
+  border-radius: var(--kiba-border-radius);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background-color: var(--kiba-color-background);
+  font-family: inherit;
+
+  &:hover {
+    border-color: var(--kiba-color-brand-primary-clear50);
+    background-color: var(--kiba-color-brand-primary-clear90);
+  }
+
+  &.selected {
+    border-color: var(--kiba-color-brand-primary);
+    border-width: 2px;
+    background-color: var(--kiba-color-brand-primary-clear90);
+  }
+
+  &.low {
+    &.selected {
+      border-color: var(--kiba-color-success);
+    }
+  }
+
+  &.medium {
+    &.selected {
+      border-color: var(--kiba-color-brand-primary);
+    }
+  }
+
+  &.high {
+    &.selected {
+      border-color: var(--kiba-color-warning);
+    }
+  }
+}
+
+.summaryCard {
+  background: linear-gradient(135deg, var(--kiba-color-background-clear90), var(--kiba-color-background-clear80));
+  border: 1px solid var(--kiba-color-brand-primary-clear50);
+}

@@ -118,4 +118,28 @@ export class MoneyHackClient extends ServiceClient {
     const response = await this.makeRequest(method, path, request, Endpoints.DisconnectTelegramResponse, this.getHeaders(authToken));
     return response.userConfig;
   };
+
+  public getAgent = async (userAddress: string, authToken: string): Promise<Resources.Agent | null> => {
+    const method = RestMethod.GET;
+    const path = `v1/users/${userAddress}/agent`;
+    const request = new Endpoints.GetAgentRequest();
+    const response = await this.makeRequest(method, path, request, Endpoints.GetAgentResponse, this.getHeaders(authToken));
+    return response.agent;
+  };
+
+  public createAgent = async (userAddress: string, name: string, emoji: string, authToken: string): Promise<Resources.Agent> => {
+    const method = RestMethod.POST;
+    const path = `v1/users/${userAddress}/agent`;
+    const request = new Endpoints.CreateAgentRequest(name, emoji);
+    const response = await this.makeRequest(method, path, request, Endpoints.CreateAgentResponse, this.getHeaders(authToken));
+    return response.agent;
+  };
+
+  public deployAgent = async (userAddress: string, agentId: string, collateralAssetAddress: string, collateralAmount: bigint, targetLtv: number, authToken: string): Promise<Resources.DeployAgentResult> => {
+    const method = RestMethod.POST;
+    const path = `v1/users/${userAddress}/agents/${agentId}/deploy`;
+    const request = new Endpoints.DeployAgentRequest(collateralAssetAddress, collateralAmount.toString(), targetLtv);
+    const response = await this.makeRequest(method, path, request, Endpoints.DeployAgentResponse, this.getHeaders(authToken));
+    return new Resources.DeployAgentResult(response.position, response.transactionHash);
+  };
 }

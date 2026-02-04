@@ -1,17 +1,17 @@
-.selectionCard {
-  display: flex;
-  align-items: center;
+.collateralCard {
   width: 100%;
   padding: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
   border: 1px solid var(--kiba-color-text-clear80);
   border-radius: var(--kiba-border-radius);
   cursor: pointer;
   transition: all 0.2s ease;
-  background-color: transparent;
+  background-color: var(--kiba-color-background);
   font-family: inherit;
-  text-align: left;
 
-  &:hover:not(.disabled) {
+  &:hover {
     border-color: var(--kiba-color-brand-primary-clear50);
     background-color: var(--kiba-color-brand-primary-clear90);
   }
@@ -22,25 +22,25 @@
     background-color: var(--kiba-color-brand-primary-clear90);
   }
 
-  &.disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
+  .yieldApy {
+    color: #00ff88;
+    text-shadow: 0 0 6px rgba(0, 255, 136, 0.6);
   }
 }
 
-.ltvCard {
+.emojiOption {
+  width: 3.5rem;
+  height: 3.5rem;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  padding: 0.75rem 1rem;
+  justify-content: center;
   border: 1px solid var(--kiba-color-text-clear80);
   border-radius: var(--kiba-border-radius);
   cursor: pointer;
   transition: all 0.2s ease;
   background-color: transparent;
+  padding: 0;
   font-family: inherit;
-  text-align: left;
 
   &:hover {
     border-color: var(--kiba-color-brand-primary-clear50);

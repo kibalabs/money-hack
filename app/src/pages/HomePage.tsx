@@ -151,7 +151,7 @@ export function HomePage(): React.ReactElement {
 
   React.useEffect(() => {
     if (isWeb3AccountLoggedIn) {
-      window.location.href = '/setup';
+      window.location.href = '/create-agent';
     }
   }, [isWeb3AccountLoggedIn]);
 

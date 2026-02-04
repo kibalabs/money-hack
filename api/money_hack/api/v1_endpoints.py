@@ -162,3 +162,31 @@ class GetEnsConfigTransactionsRequest(BaseModel):
 class GetEnsConfigTransactionsResponse(BaseModel):
     transactions: list[resources.TransactionCall]
     ens_name: str
+
+
+class CreateAgentRequest(BaseModel):
+    name: str
+    emoji: str
+
+
+class CreateAgentResponse(BaseModel):
+    agent: resources.Agent
+
+
+class DeployAgentRequest(BaseModel):
+    collateral_asset_address: str
+    collateral_amount: str
+    target_ltv: float
+
+
+class DeployAgentResponse(BaseModel):
+    position: resources.Position
+    transaction_hash: str | None = None
+
+
+class GetAgentRequest(BaseModel):
+    pass
+
+
+class GetAgentResponse(BaseModel):
+    agent: resources.Agent | None

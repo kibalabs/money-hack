@@ -1,9 +1,11 @@
 import base64
 import typing
+import uuid
 from datetime import UTC
 from datetime import datetime
 
 from core import logging
+from core.exceptions import KibaException
 from core.exceptions import NotFoundException
 from core.exceptions import UnauthorizedException
 from core.requester import Requester
@@ -15,6 +17,9 @@ from eth_account.messages import encode_defunct
 from hexbytes import HexBytes
 from siwe import SiweMessage  # type: ignore[import-untyped]
 from web3 import Web3
+from web3.types import Nonce
+from web3.types import TxParams
+from web3.types import Wei
 
 from money_hack import constants
 from money_hack.api.authorizer import Authorizer
@@ -32,12 +37,15 @@ from money_hack.api.v1_resources import Wallet
 from money_hack.api.v1_resources import WithdrawTransactionsData
 from money_hack.blockchain_data.alchemy_client import AlchemyClient
 from money_hack.blockchain_data.moralis_client import MoralisClient
+from money_hack.external.coinbase_cdp_client import CoinbaseCdpClient
 from money_hack.external.ens_client import EnsAgentConfig
 from money_hack.external.ens_client import EnsClient
 from money_hack.external.telegram_client import TelegramClient
 from money_hack.forty_acres.forty_acres_client import FortyAcresClient
 from money_hack.morpho.morpho_client import MorphoClient
 from money_hack.morpho.transaction_builder import TransactionBuilder
+from money_hack.smart_wallets.coinbase_bundler import CoinbaseBundler
+from money_hack.smart_wallets.coinbase_smart_wallet import CoinbaseSmartWallet
 from money_hack.store.database_store import DatabaseStore
 
 JsonObject = dict[str, object]
@@ -75,6 +83,9 @@ class AgentManager(Authorizer):
         telegramClient: TelegramClient,
         ensClient: EnsClient,
         databaseStore: DatabaseStore,
+        coinbaseCdpClient: CoinbaseCdpClient | None = None,
+        coinbaseSmartWallet: CoinbaseSmartWallet | None = None,
+        coinbaseBundler: CoinbaseBundler | None = None,
     ) -> None:
         self.chainId = chainId
         self.requester = requester
@@ -86,6 +97,9 @@ class AgentManager(Authorizer):
         self.telegramClient = telegramClient
         self.ensClient = ensClient
         self.databaseStore = databaseStore
+        self.coinbaseCdpClient = coinbaseCdpClient
+        self.coinbaseSmartWallet = coinbaseSmartWallet
+        self.coinbaseBundler = coinbaseBundler
         self._signatureSignerMap: dict[str, str] = {}
         self._positionsCache: dict[str, Position] = {}
         self._userConfigsCache: dict[str, UserConfig] = {}
@@ -166,6 +180,158 @@ class AgentManager(Authorizer):
         self._userConfigsCache[normalized_address] = config
         return config
 
+    async def create_agent(self, user_address: str, name: str, emoji: str) -> AgentResource:
+        if self.coinbaseCdpClient is None:
+            raise KibaException('Coinbase CDP client not configured')
+        normalizedAddress = chain_util.normalize_address(user_address)
+        user = await self.databaseStore.get_or_create_user_by_wallet(walletAddress=normalizedAddress)
+        existingAgents = await self.databaseStore.get_agents_by_user(userId=user.userId)
+        if existingAgents:
+            raise KibaException('User already has an agent')
+        agentId = str(uuid.uuid4())
+        walletAddress = await self.coinbaseCdpClient.create_eoa(name=agentId)
+        agent = await self.databaseStore.create_agent(userId=user.userId, name=name, emoji=emoji, walletAddress=walletAddress)
+        return AgentResource(
+            agent_id=agent.agentId,
+            name=agent.name,
+            emoji=agent.emoji,
+            agent_index=agent.agentIndex,
+            wallet_address=agent.walletAddress,
+            ens_name=agent.ensName,
+            created_date=agent.createdDate,
+        )
+
+    async def get_agent(self, user_address: str) -> AgentResource | None:
+        normalizedAddress = chain_util.normalize_address(user_address)
+        user = await self.databaseStore.get_user_by_wallet(walletAddress=normalizedAddress)
+        if user is None:
+            return None
+        agents = await self.databaseStore.get_agents_by_user(userId=user.userId)
+        if not agents:
+            return None
+        agent = agents[0]
+        return AgentResource(
+            agent_id=agent.agentId,
+            name=agent.name,
+            emoji=agent.emoji,
+            agent_index=agent.agentIndex,
+            wallet_address=agent.walletAddress,
+            ens_name=agent.ensName,
+            created_date=agent.createdDate,
+        )
+
+    async def deploy_agent(self, user_address: str, agent_id: str, collateral_asset_address: str, collateral_amount: str, target_ltv: float) -> tuple[Position, str | None]:
+        if self.coinbaseCdpClient is None:
+            raise KibaException('Coinbase CDP client not configured')
+        normalizedAddress = chain_util.normalize_address(user_address)
+        user = await self.databaseStore.get_user_by_wallet(walletAddress=normalizedAddress)
+        if user is None:
+            raise KibaException('User not found')
+        agent = await self.databaseStore.get_agent_by_id(agentId=agent_id)
+        if agent is None or agent.userId != user.userId:
+            raise KibaException('Agent not found')
+        collateral = next((c for c in SUPPORTED_COLLATERALS if c.address.lower() == collateral_asset_address.lower()), SUPPORTED_COLLATERALS[0])
+        try:
+            priceUsd = await self._get_asset_price(assetAddress=collateral_asset_address)
+            collateralAmountHuman = int(collateral_amount) / (10**collateral.decimals)
+            collateralValue = collateralAmountHuman * priceUsd
+        except Exception:  # noqa: BLE001
+            logging.exception(f'Failed to fetch price for {collateral_asset_address}')
+            collateralValue = 100000.0
+        borrowValue = collateralValue * target_ltv
+        borrowAmountRaw = int(borrowValue * 1e6)
+        vaultSharesRaw = borrowAmountRaw
+        estimatedApy = 0.08
+        try:
+            yieldApy = await self.fortyAcresClient.get_yield_apy(chainId=self.chainId)
+            if yieldApy is not None:
+                estimatedApy = yieldApy
+        except Exception:  # noqa: BLE001
+            logging.exception('Failed to get yield APY for position')
+        market = await self.morphoClient.get_market(chain_id=self.chainId, collateral_address=collateral_asset_address)
+        morphoMarketId = market.unique_key if market else ''
+        await self.databaseStore.create_position(
+            agentId=agent.agentId,
+            collateralAsset=collateral_asset_address,
+            collateralAmount=int(collateral_amount),
+            borrowAmount=borrowAmountRaw,
+            targetLtv=target_ltv,
+            vaultShares=vaultSharesRaw,
+            morphoMarketId=morphoMarketId,
+        )
+        transactionHash = await self._execute_agent_deploy_transactions(
+            agentWalletAddress=agent.walletAddress,
+            collateralAssetAddress=collateral_asset_address,
+            collateralAmount=collateral_amount,
+            targetLtv=target_ltv,
+        )
+        position = Position(
+            position_id=f'pos-{normalizedAddress[:8]}',
+            created_date=datetime.now(tz=UTC),
+            user_address=normalizedAddress,
+            collateral_asset=collateral,
+            collateral_amount=collateral_amount,
+            collateral_value_usd=collateralValue,
+            borrow_amount=str(borrowAmountRaw),
+            borrow_value_usd=borrowValue,
+            current_ltv=target_ltv,
+            target_ltv=target_ltv,
+            health_factor=1.0 / target_ltv,
+            vault_balance=str(borrowAmountRaw),
+            vault_balance_usd=borrowValue,
+            accrued_yield='0',
+            accrued_yield_usd=0.0,
+            estimated_apy=estimatedApy,
+            status='active',
+        )
+        self._positionsCache[normalizedAddress] = position
+        return position, transactionHash
+
+    async def _execute_agent_deploy_transactions(self, agentWalletAddress: str, collateralAssetAddress: str, collateralAmount: str, targetLtv: float) -> str | None:
+        if self.coinbaseCdpClient is None:
+            return None
+        transactionsData = await self._build_position_transactions(
+            userAddress=agentWalletAddress,
+            collateralAssetAddress=collateralAssetAddress,
+            collateralAmount=collateralAmount,
+            targetLtv=targetLtv,
+        )
+        lastTxHash = None
+        for tx in transactionsData.transactions:
+            nonce = await self.ethClient.get_transaction_count(address=agentWalletAddress)
+            maxPriorityFeePerGas = await self.ethClient.get_max_priority_fee_per_gas()
+            maxFeePerGas = await self.ethClient.get_max_fee_per_gas(maxPriorityFeePerGas=maxPriorityFeePerGas)
+            txParams = await self.ethClient.fill_transaction_params(
+                params={'to': tx.to, 'data': HexBytes(tx.data), 'value': Wei(int(tx.value or '0'))},
+                fromAddress=agentWalletAddress,
+                nonce=nonce,
+                maxFeePerGas=int(maxFeePerGas * 1.5),
+                maxPriorityFeePerGas=int(maxPriorityFeePerGas * 1.2),
+                chainId=self.chainId,
+            )
+
+            def parse_hex_int(value: object) -> int:
+                strValue = str(value)
+                return int(strValue, 16) if strValue.startswith('0x') else int(strValue)
+
+            txParamsForSigning: TxParams = {
+                'chainId': parse_hex_int(txParams['chainId']),
+                'nonce': Nonce(parse_hex_int(txParams['nonce'])),
+                'to': Web3.to_checksum_address(typing.cast(str, txParams['to'])),
+                'data': HexBytes(txParams['data']),
+                'value': Wei(parse_hex_int(txParams['value'])),
+                'gas': int(parse_hex_int(txParams['gas']) * 1.2),
+                'maxFeePerGas': Wei(parse_hex_int(txParams['maxFeePerGas'])),
+                'maxPriorityFeePerGas': Wei(parse_hex_int(txParams['maxPriorityFeePerGas'])),
+            }
+            signedTx = await self.coinbaseCdpClient.sign_transaction(walletAddress=agentWalletAddress, transactionDict=txParamsForSigning)
+            lastTxHash = await self.ethClient.send_raw_transaction(transactionData=signedTx)
+            logging.info(f'Agent executed transaction: {lastTxHash}')
+        return lastTxHash
+
+    async def _build_position_transactions(self, userAddress: str, collateralAssetAddress: str, collateralAmount: str, targetLtv: float) -> PositionTransactionsData:
+        return await self.get_position_transactions(user_address=userAddress, collateral_asset_address=collateralAssetAddress, collateral_amount=collateralAmount, target_ltv=targetLtv)
+
     async def create_position(self, user_address: str, collateral_asset_address: str, collateral_amount: str, target_ltv: float, agent_name: str, agent_emoji: str) -> tuple[Position, AgentResource]:
         collateral = next((c for c in SUPPORTED_COLLATERALS if c.address.lower() == collateral_asset_address.lower()), SUPPORTED_COLLATERALS[0])
         try:
@@ -186,7 +352,11 @@ class AgentManager(Authorizer):
         except Exception:  # noqa: BLE001
             logging.exception('Failed to get yield APY for position')
         user = await self.databaseStore.get_or_create_user_by_wallet(walletAddress=normalized_address)
-        agent = await self.databaseStore.create_agent(userId=user.userId, name=agent_name, emoji=agent_emoji)
+        agentId = str(uuid.uuid4())
+        walletAddress = normalized_address
+        if self.coinbaseCdpClient is not None:
+            walletAddress = await self.coinbaseCdpClient.create_eoa(name=agentId)
+        agent = await self.databaseStore.create_agent(userId=user.userId, name=agent_name, emoji=agent_emoji, walletAddress=walletAddress)
         market = await self.morphoClient.get_market(chain_id=self.chainId, collateral_address=collateral_asset_address)
         morphoMarketId = market.unique_key if market else ''
         borrowAmountRaw = int(borrow_value * 1e6)
@@ -225,6 +395,7 @@ class AgentManager(Authorizer):
             name=agent.name,
             emoji=agent.emoji,
             agent_index=agent.agentIndex,
+            wallet_address=agent.walletAddress,
             ens_name=agent.ensName,
             created_date=agent.createdDate,
         )

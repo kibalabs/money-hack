@@ -1,0 +1,11 @@
+.stepIndicator {
+  width: 2rem;
+  height: 0.25rem;
+  border-radius: 0.125rem;
+  background-color: var(--kiba-color-text-clear80);
+  transition: background-color 0.3s ease;
+
+  &.active {
+    background-color: var(--kiba-color-brand-primary);
+  }
+}

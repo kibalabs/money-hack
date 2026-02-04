@@ -18,7 +18,7 @@ w3 = Web3()
 def encode_approve(spender: str, amount: int) -> str:
     contract = w3.eth.contract(abi=morpho_abis.ERC20_ABI)
     fn = contract.functions.approve(spender, amount)
-    encoded = fn._encode_transaction_data()
+    encoded = fn._encode_transaction_data()  # noqa: SLF001
     return str(encoded) if isinstance(encoded, (bytes, str)) else encoded
 
 
@@ -40,7 +40,7 @@ def encode_supply_collateral(
     )
     contract = w3.eth.contract(abi=morpho_abis.MORPHO_BLUE_ABI)
     fn = contract.functions.supplyCollateral(market_params, assets, Web3.to_checksum_address(on_behalf), b'')
-    encoded = fn._encode_transaction_data()
+    encoded = fn._encode_transaction_data()  # noqa: SLF001
     return str(encoded) if isinstance(encoded, (bytes, str)) else encoded
 
 
@@ -69,7 +69,7 @@ def encode_borrow(
         Web3.to_checksum_address(on_behalf),
         Web3.to_checksum_address(receiver),
     )
-    encoded = fn._encode_transaction_data()
+    encoded = fn._encode_transaction_data()  # noqa: SLF001
     return str(encoded) if isinstance(encoded, (bytes, str)) else encoded
 
 
@@ -91,7 +91,7 @@ def encode_repay(
     )
     contract = w3.eth.contract(abi=morpho_abis.MORPHO_BLUE_ABI)
     fn = contract.functions.repay(market_params, assets, 0, Web3.to_checksum_address(on_behalf), b'')
-    encoded = fn._encode_transaction_data()
+    encoded = fn._encode_transaction_data()  # noqa: SLF001
     return str(encoded) if isinstance(encoded, (bytes, str)) else encoded
 
 
@@ -119,21 +119,21 @@ def encode_withdraw_collateral(
         Web3.to_checksum_address(on_behalf),
         Web3.to_checksum_address(receiver),
     )
-    encoded = fn._encode_transaction_data()
+    encoded = fn._encode_transaction_data()  # noqa: SLF001
     return str(encoded) if isinstance(encoded, (bytes, str)) else encoded
 
 
 def encode_vault_deposit(assets: int, receiver: str) -> str:
     contract = w3.eth.contract(abi=morpho_abis.ERC4626_VAULT_ABI)
     fn = contract.functions.deposit(assets, Web3.to_checksum_address(receiver))
-    encoded = fn._encode_transaction_data()
+    encoded = fn._encode_transaction_data()  # noqa: SLF001
     return str(encoded) if isinstance(encoded, (bytes, str)) else encoded
 
 
 def encode_vault_withdraw(assets: int, receiver: str, owner: str) -> str:
     contract = w3.eth.contract(abi=morpho_abis.ERC4626_VAULT_ABI)
     fn = contract.functions.withdraw(assets, Web3.to_checksum_address(receiver), Web3.to_checksum_address(owner))
-    encoded = fn._encode_transaction_data()
+    encoded = fn._encode_transaction_data()  # noqa: SLF001
     return str(encoded) if isinstance(encoded, (bytes, str)) else encoded
 
 

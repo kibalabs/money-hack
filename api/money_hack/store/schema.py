@@ -53,6 +53,7 @@ AgentsTable = sqlalchemy.Table(
     sqlalchemy.Column(key='name', name='name', type_=sqlalchemy.Text, nullable=False),
     sqlalchemy.Column(key='emoji', name='emoji', type_=sqlalchemy.Text, nullable=False),
     sqlalchemy.Column(key='agentIndex', name='agent_index', type_=sqlalchemy.Integer, nullable=False),
+    sqlalchemy.Column(key='walletAddress', name='wallet_address', type_=sqlalchemy.Text, nullable=False),
     sqlalchemy.Column(key='ensName', name='ens_name', type_=sqlalchemy.Text, nullable=True),
 )
 

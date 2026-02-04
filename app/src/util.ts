@@ -2,6 +2,17 @@ import React from 'react';
 
 import { isBrowser } from '@kibalabs/core';
 
+export const formatBalance = (balance: bigint, decimals: number): string => {
+  const divisor = 10n ** BigInt(decimals);
+  const wholePart = balance / divisor;
+  const fractionalPart = balance % divisor;
+  const fractionalStr = fractionalPart.toString().padStart(decimals, '0');
+  const trimmedFractional = fractionalStr.slice(0, 6).replace(/0+$/, '');
+  if (trimmedFractional === '') {
+    return wholePart.toString();
+  }
+  return `${wholePart}.${trimmedFractional}`;
+};
 
 export const getIsNextVersion = (): boolean => {
   if (isBrowser() && window.KRT_IS_NEXT && window.KRT_IS_NEXT != null && ['1', 'true', 'yes', 'y', 'on'].includes(window.KRT_IS_NEXT.toLowerCase())) {

@@ -100,5 +100,6 @@ class Agent(BaseModel):
     name: str
     emoji: str
     agent_index: int
+    wallet_address: str
     ens_name: str | None = None
     created_date: datetime

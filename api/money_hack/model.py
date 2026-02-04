@@ -32,6 +32,7 @@ class Agent(BaseModel):
     name: str
     emoji: str
     agentIndex: int
+    walletAddress: str
     ensName: str | None
 
 

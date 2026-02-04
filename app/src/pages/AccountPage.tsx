@@ -69,7 +69,7 @@ export function AccountPage(): React.ReactElement {
     }
     setIsConnectingTelegram(true);
     try {
-      const botUsername = await moneyHackClient.getTelegramLoginUrl(accountAddress, authToken);
+      const botUsername = await moneyHackClient.getTelegramBotUsername(accountAddress, authToken);
       setTelegramBotUsername(botUsername);
     } catch (error) {
       console.error('Failed to get Telegram bot:', error);
@@ -119,7 +119,10 @@ export function AccountPage(): React.ReactElement {
             <Stack direction={Direction.Vertical} shouldAddGutters={true}>
               <Stack direction={Direction.Horizontal} shouldAddGutters={true} childAlignment={Alignment.Center}>
                 <KibaIcon iconId='ion-checkmark-circle' variant='success' />
-                <Text>Connected as @{userConfig?.telegramHandle}</Text>
+                <Text>
+                  Connected as @
+                  {userConfig?.telegramHandle}
+                </Text>
               </Stack>
               <Button
                 variant='secondary'

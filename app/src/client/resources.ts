@@ -198,6 +198,7 @@ export class Agent {
     readonly name: string,
     readonly emoji: string,
     readonly agentIndex: number,
+    readonly walletAddress: string,
     readonly ensName: string | null,
     readonly createdDate: Date,
   ) { }
@@ -208,6 +209,7 @@ export class Agent {
       String(obj.name),
       String(obj.emoji),
       Number(obj.agent_index),
+      String(obj.wallet_address),
       obj.ens_name ? String(obj.ens_name) : null,
       dateFromString(String(obj.created_date)),
     );
@@ -224,6 +226,20 @@ export class CreatePositionResult {
     return new CreatePositionResult(
       Position.fromObject(obj.position as RawObject),
       Agent.fromObject(obj.agent as RawObject),
+    );
+  };
+}
+
+export class DeployAgentResult {
+  public constructor(
+    readonly position: Position,
+    readonly transactionHash: string | null,
+  ) { }
+
+  public static fromObject = (obj: RawObject): DeployAgentResult => {
+    return new DeployAgentResult(
+      Position.fromObject(obj.position as RawObject),
+      obj.transaction_hash ? String(obj.transaction_hash) : null,
     );
   };
 }

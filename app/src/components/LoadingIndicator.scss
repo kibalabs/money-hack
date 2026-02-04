@@ -1,0 +1,56 @@
+.loadingIndicator {
+  display: flex;
+  align-items: flex-end;
+  gap: 5px;
+  width: 40px;
+  height: 40px;
+}
+
+.loadingIndicatorDot {
+  flex: 1;
+  background: linear-gradient(
+    to top,
+    var(--kiba-color-brand-primary),
+    var(--kiba-color-brand-primary),
+    var(--kiba-color-brand-secondary),
+  );
+  border-radius: 3px 3px 0 0;
+  transform-origin: bottom;
+  opacity: 0;
+  transform: scaleY(0);
+  animation: loadingIndicatorAnimation 2.5s infinite ease-in-out;
+}
+
+/* Proportional heights */
+.loadingIndicatorDot:nth-child(1) { height: 40%; animation-delay: 0.1s; }
+.loadingIndicatorDot:nth-child(2) { height: 70%; animation-delay: 0.3s; }
+.loadingIndicatorDot:nth-child(3) { height: 100%; animation-delay: 0.5s; }
+
+@keyframes loadingIndicatorAnimation {
+  0% {
+    transform: scaleY(0);
+    opacity: 0;
+    transform-origin: bottom;
+  }
+  /* Phase 1: Grow up from bottom */
+  25% {
+    transform: scaleY(1);
+    opacity: 1;
+    transform-origin: bottom;
+  }
+  /* Phase 2: Hold full height */
+  70% {
+    transform: scaleY(1);
+    opacity: 1;
+    transform-origin: bottom;
+  }
+  /* Phase 3: Shrink UPWARD (Lift the bottom) */
+  70.01% {
+    transform-origin: top;
+  }
+  100% {
+    transform: scaleY(0);
+    opacity: 0;
+    transform-origin: top;
+  }
+}

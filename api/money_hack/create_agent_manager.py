@@ -11,14 +11,21 @@ from money_hack.blockchain_data.alchemy_client import AlchemyClient
 from money_hack.blockchain_data.blockscout_client import BlockscoutClient
 from money_hack.blockchain_data.findblock_client import FindBlockClient
 from money_hack.blockchain_data.moralis_client import MoralisClient
+from money_hack.external.coinbase_cdp_client import CoinbaseCdpClient
 from money_hack.external.ens_client import EnsClient
 from money_hack.external.telegram_client import TelegramClient
 from money_hack.forty_acres.forty_acres_client import FortyAcresClient
 from money_hack.morpho.morpho_client import MorphoClient
+from money_hack.smart_wallets.coinbase_bundler import CoinbaseBundler
+from money_hack.smart_wallets.coinbase_smart_wallet import CoinbaseSmartWallet
 from money_hack.store.database_store import DatabaseStore
 
 BASE_CHAIN_ID = 8453
 BASE_RPC_URL = os.environ['BASE_RPC_URL']
+BASE_PAYMASTER_RPC_URL = os.environ['BASE_PAYMASTER_RPC_URL']
+CDP_WALLET_SECRET = os.environ['CDP_WALLET_SECRET']
+CDP_API_KEY_NAME = os.environ['CDP_API_KEY_NAME']
+CDP_API_KEY_PRIVATE_KEY = os.environ['CDP_API_KEY_PRIVATE_KEY']
 MORALIS_API_KEY = os.environ['MORALIS_API_KEY']
 ALCHEMY_API_KEY = os.environ['ALCHEMY_API_KEY']
 BLOCKSCOUT_API_KEY = os.environ['BLOCKSCOUT_API_KEY']
@@ -36,6 +43,7 @@ def create_agent_manager() -> AgentManager:
     requester = Requester()
     cache = FileCache(cacheDirectory='./data/cache')
     ethClient = RestEthClient(url=BASE_RPC_URL, chainId=BASE_CHAIN_ID, requester=requester)
+    paymasterEthClient = RestEthClient(url=BASE_PAYMASTER_RPC_URL, chainId=BASE_CHAIN_ID, requester=requester) if BASE_PAYMASTER_RPC_URL else None
     moralisClient = MoralisClient(requester=requester, apiKey=MORALIS_API_KEY, cache=cache)
     findBlockClient = FindBlockClient(requester=requester, cache=cache)
     alchemyClient = AlchemyClient(requester=requester, apiKey=ALCHEMY_API_KEY, cache=cache, findBlockClient=findBlockClient)
@@ -50,6 +58,18 @@ def create_agent_manager() -> AgentManager:
         origin=APP_URL,
     )
     ensClient = EnsClient(requester=requester, chainId=BASE_CHAIN_ID)
+    coinbaseCdpClient = (
+        CoinbaseCdpClient(
+            requester=requester,
+            walletSecret=CDP_WALLET_SECRET,
+            apiKeyName=CDP_API_KEY_NAME,
+            apiKeyPrivateKey=CDP_API_KEY_PRIVATE_KEY,
+        )
+        if CDP_WALLET_SECRET and CDP_API_KEY_NAME and CDP_API_KEY_PRIVATE_KEY
+        else None
+    )
+    coinbaseSmartWallet = CoinbaseSmartWallet(ethClient=ethClient) if paymasterEthClient else None
+    coinbaseBundler = CoinbaseBundler(paymasterEthClient=paymasterEthClient) if paymasterEthClient else None
     encodedPassword = quote_plus(DB_PASSWORD) if DB_PASSWORD else ''
     databaseConnectionString = f'postgresql+asyncpg://{DB_USERNAME}:{encodedPassword}@{DB_HOST}:{DB_PORT}/{DB_NAME}'
     database = Database(connectionString=databaseConnectionString)
@@ -65,5 +85,8 @@ def create_agent_manager() -> AgentManager:
         telegramClient=telegramClient,
         ensClient=ensClient,
         databaseStore=databaseStore,
+        coinbaseCdpClient=coinbaseCdpClient,
+        coinbaseSmartWallet=coinbaseSmartWallet,
+        coinbaseBundler=coinbaseBundler,
     )
     return agentManager

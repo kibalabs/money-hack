@@ -368,3 +368,91 @@ export class DisconnectTelegramResponse extends ResponseData {
     );
   };
 }
+
+export class GetAgentRequest extends RequestData {
+  public constructor() {
+    super();
+  }
+
+  public toObject = (): RawObject => {
+    return {};
+  };
+}
+
+export class GetAgentResponse extends ResponseData {
+  public constructor(
+    readonly agent: Resources.Agent | null,
+  ) {
+    super();
+  }
+
+  public static fromObject = (obj: RawObject): GetAgentResponse => {
+    return new GetAgentResponse(
+      obj.agent ? Resources.Agent.fromObject(obj.agent as RawObject) : null,
+    );
+  };
+}
+
+export class CreateAgentRequest extends RequestData {
+  public constructor(
+    readonly name: string,
+    readonly emoji: string,
+  ) {
+    super();
+  }
+
+  public toObject = (): RawObject => {
+    return {
+      name: this.name,
+      emoji: this.emoji,
+    };
+  };
+}
+
+export class CreateAgentResponse extends ResponseData {
+  public constructor(
+    readonly agent: Resources.Agent,
+  ) {
+    super();
+  }
+
+  public static fromObject = (obj: RawObject): CreateAgentResponse => {
+    return new CreateAgentResponse(
+      Resources.Agent.fromObject(obj.agent as RawObject),
+    );
+  };
+}
+
+export class DeployAgentRequest extends RequestData {
+  public constructor(
+    readonly collateralAssetAddress: string,
+    readonly collateralAmount: string,
+    readonly targetLtv: number,
+  ) {
+    super();
+  }
+
+  public toObject = (): RawObject => {
+    return {
+      collateral_asset_address: this.collateralAssetAddress,
+      collateral_amount: this.collateralAmount,
+      target_ltv: this.targetLtv,
+    };
+  };
+}
+
+export class DeployAgentResponse extends ResponseData {
+  public constructor(
+    readonly position: Resources.Position,
+    readonly transactionHash: string | null,
+  ) {
+    super();
+  }
+
+  public static fromObject = (obj: RawObject): DeployAgentResponse => {
+    return new DeployAgentResponse(
+      Resources.Position.fromObject(obj.position as RawObject),
+      obj.transaction_hash ? String(obj.transaction_hash) : null,
+    );
+  };
+}

@@ -1,0 +1,557 @@
+# mypy: disable-error-code="typeddict-item, misc, list-item, typeddict-unknown-key"
+
+from eth_typing import ABI
+
+COINBASE_ENTRYPOINT_ABI: ABI = [
+    {
+        'inputs': [
+            {'name': 'preOpGas', 'type': 'uint256'},
+            {'name': 'paid', 'type': 'uint256'},
+            {'name': 'validAfter', 'type': 'uint48'},
+            {'name': 'validUntil', 'type': 'uint48'},
+            {'name': 'targetSuccess', 'type': 'bool'},
+            {'name': 'targetResult', 'type': 'bytes'},
+        ],
+        'name': 'ExecutionResult',
+        'type': 'error',
+    },
+    {'inputs': [{'name': 'opIndex', 'type': 'uint256'}, {'name': 'reason', 'type': 'string'}], 'name': 'FailedOp', 'type': 'error'},
+    {'inputs': [{'name': 'sender', 'type': 'address'}], 'name': 'SenderAddressResult', 'type': 'error'},
+    {'inputs': [{'name': 'aggregator', 'type': 'address'}], 'name': 'SignatureValidationFailed', 'type': 'error'},
+    {
+        'inputs': [
+            {
+                'components': [
+                    {'name': 'preOpGas', 'type': 'uint256'},
+                    {'name': 'prefund', 'type': 'uint256'},
+                    {'name': 'sigFailed', 'type': 'bool'},
+                    {'name': 'validAfter', 'type': 'uint48'},
+                    {'name': 'validUntil', 'type': 'uint48'},
+                    {'name': 'paymasterContext', 'type': 'bytes'},
+                ],
+                'name': 'returnInfo',
+                'type': 'tuple',
+            },
+            {'components': [{'name': 'stake', 'type': 'uint256'}, {'name': 'unstakeDelaySec', 'type': 'uint256'}], 'name': 'senderInfo', 'type': 'tuple'},
+            {'components': [{'name': 'stake', 'type': 'uint256'}, {'name': 'unstakeDelaySec', 'type': 'uint256'}], 'name': 'factoryInfo', 'type': 'tuple'},
+            {
+                'components': [{'name': 'stake', 'type': 'uint256'}, {'name': 'unstakeDelaySec', 'type': 'uint256'}],
+                'name': 'paymasterInfo',
+                'type': 'tuple',
+            },
+        ],
+        'name': 'ValidationResult',
+        'type': 'error',
+    },
+    {
+        'inputs': [
+            {
+                'components': [
+                    {'name': 'preOpGas', 'type': 'uint256'},
+                    {'name': 'prefund', 'type': 'uint256'},
+                    {'name': 'sigFailed', 'type': 'bool'},
+                    {'name': 'validAfter', 'type': 'uint48'},
+                    {'name': 'validUntil', 'type': 'uint48'},
+                    {'name': 'paymasterContext', 'type': 'bytes'},
+                ],
+                'name': 'returnInfo',
+                'type': 'tuple',
+            },
+            {'components': [{'name': 'stake', 'type': 'uint256'}, {'name': 'unstakeDelaySec', 'type': 'uint256'}], 'name': 'senderInfo', 'type': 'tuple'},
+            {'components': [{'name': 'stake', 'type': 'uint256'}, {'name': 'unstakeDelaySec', 'type': 'uint256'}], 'name': 'factoryInfo', 'type': 'tuple'},
+            {
+                'components': [{'name': 'stake', 'type': 'uint256'}, {'name': 'unstakeDelaySec', 'type': 'uint256'}],
+                'name': 'paymasterInfo',
+                'type': 'tuple',
+            },
+            {
+                'components': [
+                    {'name': 'aggregator', 'type': 'address'},
+                    {
+                        'components': [{'name': 'stake', 'type': 'uint256'}, {'name': 'unstakeDelaySec', 'type': 'uint256'}],
+                        'name': 'stakeInfo',
+                        'type': 'tuple',
+                    },
+                ],
+                'name': 'aggregatorInfo',
+                'type': 'tuple',
+            },
+        ],
+        'name': 'ValidationResultWithAggregation',
+        'type': 'error',
+    },
+    {
+        'anonymous': False,
+        'inputs': [
+            {'indexed': True, 'name': 'userOpHash', 'type': 'bytes32'},
+            {'indexed': True, 'name': 'sender', 'type': 'address'},
+            {'indexed': False, 'name': 'factory', 'type': 'address'},
+            {'indexed': False, 'name': 'paymaster', 'type': 'address'},
+        ],
+        'name': 'AccountDeployed',
+        'type': 'event',
+    },
+    {'anonymous': False, 'inputs': [], 'name': 'BeforeExecution', 'type': 'event'},
+    {'anonymous': False, 'inputs': [{'indexed': True, 'name': 'account', 'type': 'address'}, {'indexed': False, 'name': 'totalDeposit', 'type': 'uint256'}], 'name': 'Deposited', 'type': 'event'},
+    {'anonymous': False, 'inputs': [{'indexed': True, 'name': 'aggregator', 'type': 'address'}], 'name': 'SignatureAggregatorChanged', 'type': 'event'},
+    {
+        'anonymous': False,
+        'inputs': [
+            {'indexed': True, 'name': 'account', 'type': 'address'},
+            {'indexed': False, 'name': 'totalStaked', 'type': 'uint256'},
+            {'indexed': False, 'name': 'unstakeDelaySec', 'type': 'uint256'},
+        ],
+        'name': 'StakeLocked',
+        'type': 'event',
+    },
+    {'anonymous': False, 'inputs': [{'indexed': True, 'name': 'account', 'type': 'address'}, {'indexed': False, 'name': 'withdrawTime', 'type': 'uint256'}], 'name': 'StakeUnlocked', 'type': 'event'},
+    {
+        'anonymous': False,
+        'inputs': [
+            {'indexed': True, 'name': 'account', 'type': 'address'},
+            {'indexed': False, 'name': 'withdrawAddress', 'type': 'address'},
+            {'indexed': False, 'name': 'amount', 'type': 'uint256'},
+        ],
+        'name': 'StakeWithdrawn',
+        'type': 'event',
+    },
+    {
+        'anonymous': False,
+        'inputs': [
+            {'indexed': True, 'name': 'userOpHash', 'type': 'bytes32'},
+            {'indexed': True, 'name': 'sender', 'type': 'address'},
+            {'indexed': True, 'name': 'paymaster', 'type': 'address'},
+            {'indexed': False, 'name': 'nonce', 'type': 'uint256'},
+            {'indexed': False, 'name': 'success', 'type': 'bool'},
+            {'indexed': False, 'name': 'actualGasCost', 'type': 'uint256'},
+            {'indexed': False, 'name': 'actualGasUsed', 'type': 'uint256'},
+        ],
+        'name': 'UserOperationEvent',
+        'type': 'event',
+    },
+    {
+        'anonymous': False,
+        'inputs': [
+            {'indexed': True, 'name': 'userOpHash', 'type': 'bytes32'},
+            {'indexed': True, 'name': 'sender', 'type': 'address'},
+            {'indexed': False, 'name': 'nonce', 'type': 'uint256'},
+            {'indexed': False, 'name': 'revertReason', 'type': 'bytes'},
+        ],
+        'name': 'UserOperationRevertReason',
+        'type': 'event',
+    },
+    {
+        'anonymous': False,
+        'inputs': [
+            {'indexed': True, 'name': 'account', 'type': 'address'},
+            {'indexed': False, 'name': 'withdrawAddress', 'type': 'address'},
+            {'indexed': False, 'name': 'amount', 'type': 'uint256'},
+        ],
+        'name': 'Withdrawn',
+        'type': 'event',
+    },
+    {'inputs': [], 'name': 'SIG_VALIDATION_FAILED', 'outputs': [{'name': '', 'type': 'uint256'}], 'stateMutability': 'view', 'type': 'function'},
+    {
+        'inputs': [{'name': 'initCode', 'type': 'bytes'}, {'name': 'sender', 'type': 'address'}, {'name': 'paymasterAndData', 'type': 'bytes'}],
+        'name': '_validateSenderAndPaymaster',
+        'outputs': [],
+        'stateMutability': 'view',
+        'type': 'function',
+    },
+    {'inputs': [{'name': 'unstakeDelaySec', 'type': 'uint32'}], 'name': 'addStake', 'outputs': [], 'stateMutability': 'payable', 'type': 'function'},
+    {'inputs': [{'name': 'account', 'type': 'address'}], 'name': 'balanceOf', 'outputs': [{'name': '', 'type': 'uint256'}], 'stateMutability': 'view', 'type': 'function'},
+    {'inputs': [{'name': 'account', 'type': 'address'}], 'name': 'depositTo', 'outputs': [], 'stateMutability': 'payable', 'type': 'function'},
+    {
+        'inputs': [{'name': '', 'type': 'address'}],
+        'name': 'deposits',
+        'outputs': [
+            {'name': 'deposit', 'type': 'uint112'},
+            {'name': 'staked', 'type': 'bool'},
+            {'name': 'stake', 'type': 'uint112'},
+            {'name': 'unstakeDelaySec', 'type': 'uint32'},
+            {'name': 'withdrawTime', 'type': 'uint48'},
+        ],
+        'stateMutability': 'view',
+        'type': 'function',
+    },
+    {
+        'inputs': [{'name': 'account', 'type': 'address'}],
+        'name': 'getDepositInfo',
+        'outputs': [
+            {
+                'components': [
+                    {'name': 'deposit', 'type': 'uint112'},
+                    {'name': 'staked', 'type': 'bool'},
+                    {'name': 'stake', 'type': 'uint112'},
+                    {'name': 'unstakeDelaySec', 'type': 'uint32'},
+                    {'name': 'withdrawTime', 'type': 'uint48'},
+                ],
+                'name': 'info',
+                'type': 'tuple',
+            }
+        ],
+        'stateMutability': 'view',
+        'type': 'function',
+    },
+    {
+        'inputs': [{'name': 'sender', 'type': 'address'}, {'name': 'key', 'type': 'uint192'}],
+        'name': 'getNonce',
+        'outputs': [{'name': 'nonce', 'type': 'uint256'}],
+        'stateMutability': 'view',
+        'type': 'function',
+    },
+    {'inputs': [{'name': 'initCode', 'type': 'bytes'}], 'name': 'getSenderAddress', 'outputs': [], 'stateMutability': 'nonpayable', 'type': 'function'},
+    {
+        'inputs': [
+            {
+                'components': [
+                    {'name': 'sender', 'type': 'address'},
+                    {'name': 'nonce', 'type': 'uint256'},
+                    {'name': 'initCode', 'type': 'bytes'},
+                    {'name': 'callData', 'type': 'bytes'},
+                    {'name': 'callGasLimit', 'type': 'uint256'},
+                    {'name': 'verificationGasLimit', 'type': 'uint256'},
+                    {'name': 'preVerificationGas', 'type': 'uint256'},
+                    {'name': 'maxFeePerGas', 'type': 'uint256'},
+                    {'name': 'maxPriorityFeePerGas', 'type': 'uint256'},
+                    {'name': 'paymasterAndData', 'type': 'bytes'},
+                    {'name': 'signature', 'type': 'bytes'},
+                ],
+                'name': 'userOp',
+                'type': 'tuple',
+            }
+        ],
+        'name': 'getUserOpHash',
+        'outputs': [{'name': '', 'type': 'bytes32'}],
+        'stateMutability': 'view',
+        'type': 'function',
+    },
+    {
+        'inputs': [
+            {
+                'components': [
+                    {
+                        'components': [
+                            {'name': 'sender', 'type': 'address'},
+                            {'name': 'nonce', 'type': 'uint256'},
+                            {'name': 'initCode', 'type': 'bytes'},
+                            {'name': 'callData', 'type': 'bytes'},
+                            {'name': 'callGasLimit', 'type': 'uint256'},
+                            {'name': 'verificationGasLimit', 'type': 'uint256'},
+                            {'name': 'preVerificationGas', 'type': 'uint256'},
+                            {'name': 'maxFeePerGas', 'type': 'uint256'},
+                            {'name': 'maxPriorityFeePerGas', 'type': 'uint256'},
+                            {'name': 'paymasterAndData', 'type': 'bytes'},
+                            {'name': 'signature', 'type': 'bytes'},
+                        ],
+                        'name': 'userOps',
+                        'type': 'tuple[]',
+                    },
+                    {'name': 'aggregator', 'type': 'address'},
+                    {'name': 'signature', 'type': 'bytes'},
+                ],
+                'name': 'opsPerAggregator',
+                'type': 'tuple[]',
+            },
+            {'name': 'beneficiary', 'type': 'address'},
+        ],
+        'name': 'handleAggregatedOps',
+        'outputs': [],
+        'stateMutability': 'nonpayable',
+        'type': 'function',
+    },
+    {
+        'inputs': [
+            {
+                'components': [
+                    {'name': 'sender', 'type': 'address'},
+                    {'name': 'nonce', 'type': 'uint256'},
+                    {'name': 'initCode', 'type': 'bytes'},
+                    {'name': 'callData', 'type': 'bytes'},
+                    {'name': 'callGasLimit', 'type': 'uint256'},
+                    {'name': 'verificationGasLimit', 'type': 'uint256'},
+                    {'name': 'preVerificationGas', 'type': 'uint256'},
+                    {'name': 'maxFeePerGas', 'type': 'uint256'},
+                    {'name': 'maxPriorityFeePerGas', 'type': 'uint256'},
+                    {'name': 'paymasterAndData', 'type': 'bytes'},
+                    {'name': 'signature', 'type': 'bytes'},
+                ],
+                'name': 'ops',
+                'type': 'tuple[]',
+            },
+            {'name': 'beneficiary', 'type': 'address'},
+        ],
+        'name': 'handleOps',
+        'outputs': [],
+        'stateMutability': 'nonpayable',
+        'type': 'function',
+    },
+    {'inputs': [{'name': 'key', 'type': 'uint192'}], 'name': 'incrementNonce', 'outputs': [], 'stateMutability': 'nonpayable', 'type': 'function'},
+    {
+        'inputs': [
+            {'name': 'callData', 'type': 'bytes'},
+            {
+                'components': [
+                    {
+                        'components': [
+                            {'name': 'sender', 'type': 'address'},
+                            {'name': 'nonce', 'type': 'uint256'},
+                            {'name': 'callGasLimit', 'type': 'uint256'},
+                            {'name': 'verificationGasLimit', 'type': 'uint256'},
+                            {'name': 'preVerificationGas', 'type': 'uint256'},
+                            {'name': 'paymaster', 'type': 'address'},
+                            {'name': 'maxFeePerGas', 'type': 'uint256'},
+                            {'name': 'maxPriorityFeePerGas', 'type': 'uint256'},
+                        ],
+                        'name': 'mUserOp',
+                        'type': 'tuple',
+                    },
+                    {'name': 'userOpHash', 'type': 'bytes32'},
+                    {'name': 'prefund', 'type': 'uint256'},
+                    {'name': 'contextOffset', 'type': 'uint256'},
+                    {'name': 'preOpGas', 'type': 'uint256'},
+                ],
+                'name': 'opInfo',
+                'type': 'tuple',
+            },
+            {'name': 'context', 'type': 'bytes'},
+        ],
+        'name': 'innerHandleOp',
+        'outputs': [{'name': 'actualGasCost', 'type': 'uint256'}],
+        'stateMutability': 'nonpayable',
+        'type': 'function',
+    },
+    {
+        'inputs': [{'name': '', 'type': 'address'}, {'name': '', 'type': 'uint192'}],
+        'name': 'nonceSequenceNumber',
+        'outputs': [{'name': '', 'type': 'uint256'}],
+        'stateMutability': 'view',
+        'type': 'function',
+    },
+    {
+        'inputs': [
+            {
+                'components': [
+                    {'name': 'sender', 'type': 'address'},
+                    {'name': 'nonce', 'type': 'uint256'},
+                    {'name': 'initCode', 'type': 'bytes'},
+                    {'name': 'callData', 'type': 'bytes'},
+                    {'name': 'callGasLimit', 'type': 'uint256'},
+                    {'name': 'verificationGasLimit', 'type': 'uint256'},
+                    {'name': 'preVerificationGas', 'type': 'uint256'},
+                    {'name': 'maxFeePerGas', 'type': 'uint256'},
+                    {'name': 'maxPriorityFeePerGas', 'type': 'uint256'},
+                    {'name': 'paymasterAndData', 'type': 'bytes'},
+                    {'name': 'signature', 'type': 'bytes'},
+                ],
+                'name': 'op',
+                'type': 'tuple',
+            },
+            {'name': 'target', 'type': 'address'},
+            {'name': 'targetCallData', 'type': 'bytes'},
+        ],
+        'name': 'simulateHandleOp',
+        'outputs': [],
+        'stateMutability': 'nonpayable',
+        'type': 'function',
+    },
+    {
+        'inputs': [
+            {
+                'components': [
+                    {'name': 'sender', 'type': 'address'},
+                    {'name': 'nonce', 'type': 'uint256'},
+                    {'name': 'initCode', 'type': 'bytes'},
+                    {'name': 'callData', 'type': 'bytes'},
+                    {'name': 'callGasLimit', 'type': 'uint256'},
+                    {'name': 'verificationGasLimit', 'type': 'uint256'},
+                    {'name': 'preVerificationGas', 'type': 'uint256'},
+                    {'name': 'maxFeePerGas', 'type': 'uint256'},
+                    {'name': 'maxPriorityFeePerGas', 'type': 'uint256'},
+                    {'name': 'paymasterAndData', 'type': 'bytes'},
+                    {'name': 'signature', 'type': 'bytes'},
+                ],
+                'name': 'userOp',
+                'type': 'tuple',
+            }
+        ],
+        'name': 'simulateValidation',
+        'outputs': [],
+        'stateMutability': 'nonpayable',
+        'type': 'function',
+    },
+    {'inputs': [], 'name': 'unlockStake', 'outputs': [], 'stateMutability': 'nonpayable', 'type': 'function'},
+    {'inputs': [{'name': 'withdrawAddress', 'type': 'address'}], 'name': 'withdrawStake', 'outputs': [], 'stateMutability': 'nonpayable', 'type': 'function'},
+    {
+        'inputs': [{'name': 'withdrawAddress', 'type': 'address'}, {'name': 'withdrawAmount', 'type': 'uint256'}],
+        'name': 'withdrawTo',
+        'outputs': [],
+        'stateMutability': 'nonpayable',
+        'type': 'function',
+    },
+    {'stateMutability': 'payable', 'type': 'receive'},
+]
+COINBASE_NONCE_TRACKER_ABI: ABI = [
+    {'anonymous': False, 'inputs': [{'indexed': True, 'name': 'account', 'type': 'address'}, {'indexed': False, 'name': 'nonce', 'type': 'uint256'}], 'name': 'NonceUsed', 'type': 'event'},
+    {'inputs': [{'name': 'account', 'type': 'address'}], 'name': 'nonces', 'outputs': [{'name': 'nonce', 'type': 'uint256'}], 'stateMutability': 'view', 'type': 'function'},
+    {'inputs': [], 'name': 'useNonce', 'outputs': [{'name': 'nonce', 'type': 'uint256'}], 'stateMutability': 'nonpayable', 'type': 'function'},
+]
+COINBASE_SMART_WALLET_ABI: ABI = [
+    {'inputs': [], 'stateMutability': 'nonpayable', 'type': 'constructor'},
+    {'inputs': [{'name': 'owner', 'type': 'bytes'}], 'name': 'AlreadyOwner', 'type': 'error'},
+    {'inputs': [], 'name': 'Initialized', 'type': 'error'},
+    {'inputs': [{'name': 'owner', 'type': 'bytes'}], 'name': 'InvalidEthereumAddressOwner', 'type': 'error'},
+    {'inputs': [{'name': 'key', 'type': 'uint256'}], 'name': 'InvalidNonceKey', 'type': 'error'},
+    {'inputs': [{'name': 'owner', 'type': 'bytes'}], 'name': 'InvalidOwnerBytesLength', 'type': 'error'},
+    {'inputs': [], 'name': 'LastOwner', 'type': 'error'},
+    {'inputs': [{'name': 'index', 'type': 'uint256'}], 'name': 'NoOwnerAtIndex', 'type': 'error'},
+    {'inputs': [{'name': 'ownersRemaining', 'type': 'uint256'}], 'name': 'NotLastOwner', 'type': 'error'},
+    {'inputs': [{'name': 'selector', 'type': 'bytes4'}], 'name': 'SelectorNotAllowed', 'type': 'error'},
+    {'inputs': [], 'name': 'Unauthorized', 'type': 'error'},
+    {'inputs': [], 'name': 'UnauthorizedCallContext', 'type': 'error'},
+    {'inputs': [], 'name': 'UpgradeFailed', 'type': 'error'},
+    {
+        'inputs': [{'name': 'index', 'type': 'uint256'}, {'name': 'expectedOwner', 'type': 'bytes'}, {'name': 'actualOwner', 'type': 'bytes'}],
+        'name': 'WrongOwnerAtIndex',
+        'type': 'error',
+    },
+    {'anonymous': False, 'inputs': [{'indexed': True, 'name': 'index', 'type': 'uint256'}, {'indexed': False, 'name': 'owner', 'type': 'bytes'}], 'name': 'AddOwner', 'type': 'event'},
+    {'anonymous': False, 'inputs': [{'indexed': True, 'name': 'index', 'type': 'uint256'}, {'indexed': False, 'name': 'owner', 'type': 'bytes'}], 'name': 'RemoveOwner', 'type': 'event'},
+    {'anonymous': False, 'inputs': [{'indexed': True, 'name': 'implementation', 'type': 'address'}], 'name': 'Upgraded', 'type': 'event'},
+    {'stateMutability': 'payable', 'type': 'fallback'},
+    {'inputs': [], 'name': 'REPLAYABLE_NONCE_KEY', 'outputs': [{'name': '', 'type': 'uint256'}], 'stateMutability': 'view', 'type': 'function'},
+    {'inputs': [{'name': 'owner', 'type': 'address'}], 'name': 'addOwnerAddress', 'outputs': [], 'stateMutability': 'nonpayable', 'type': 'function'},
+    {'inputs': [{'name': 'x', 'type': 'bytes32'}, {'name': 'y', 'type': 'bytes32'}], 'name': 'addOwnerPublicKey', 'outputs': [], 'stateMutability': 'nonpayable', 'type': 'function'},
+    {'inputs': [{'name': 'functionSelector', 'type': 'bytes4'}], 'name': 'canSkipChainIdValidation', 'outputs': [{'name': '', 'type': 'bool'}], 'stateMutability': 'pure', 'type': 'function'},
+    {'inputs': [], 'name': 'domainSeparator', 'outputs': [{'name': '', 'type': 'bytes32'}], 'stateMutability': 'view', 'type': 'function'},
+    {
+        'inputs': [],
+        'name': 'eip712Domain',
+        'outputs': [
+            {'name': 'fields', 'type': 'bytes1'},
+            {'name': 'name', 'type': 'string'},
+            {'name': 'version', 'type': 'string'},
+            {'name': 'chainId', 'type': 'uint256'},
+            {'name': 'verifyingContract', 'type': 'address'},
+            {'name': 'salt', 'type': 'bytes32'},
+            {'name': 'extensions', 'type': 'uint256[]'},
+        ],
+        'stateMutability': 'view',
+        'type': 'function',
+    },
+    {'inputs': [], 'name': 'entryPoint', 'outputs': [{'name': '', 'type': 'address'}], 'stateMutability': 'view', 'type': 'function'},
+    {
+        'inputs': [{'name': 'target', 'type': 'address'}, {'name': 'value', 'type': 'uint256'}, {'name': 'data', 'type': 'bytes'}],
+        'name': 'execute',
+        'outputs': [],
+        'stateMutability': 'payable',
+        'type': 'function',
+    },
+    {
+        'inputs': [
+            {
+                'components': [{'name': 'target', 'type': 'address'}, {'name': 'value', 'type': 'uint256'}, {'name': 'data', 'type': 'bytes'}],
+                'name': 'calls',
+                'type': 'tuple[]',
+            }
+        ],
+        'name': 'executeBatch',
+        'outputs': [],
+        'stateMutability': 'payable',
+        'type': 'function',
+    },
+    {'inputs': [{'name': 'calls', 'type': 'bytes[]'}], 'name': 'executeWithoutChainIdValidation', 'outputs': [], 'stateMutability': 'payable', 'type': 'function'},
+    {
+        'inputs': [
+            {
+                'components': [
+                    {'name': 'sender', 'type': 'address'},
+                    {'name': 'nonce', 'type': 'uint256'},
+                    {'name': 'initCode', 'type': 'bytes'},
+                    {'name': 'callData', 'type': 'bytes'},
+                    {'name': 'callGasLimit', 'type': 'uint256'},
+                    {'name': 'verificationGasLimit', 'type': 'uint256'},
+                    {'name': 'preVerificationGas', 'type': 'uint256'},
+                    {'name': 'maxFeePerGas', 'type': 'uint256'},
+                    {'name': 'maxPriorityFeePerGas', 'type': 'uint256'},
+                    {'name': 'paymasterAndData', 'type': 'bytes'},
+                    {'name': 'signature', 'type': 'bytes'},
+                ],
+                'name': 'userOp',
+                'type': 'tuple',
+            }
+        ],
+        'name': 'getUserOpHashWithoutChainId',
+        'outputs': [{'name': '', 'type': 'bytes32'}],
+        'stateMutability': 'view',
+        'type': 'function',
+    },
+    {'inputs': [], 'name': 'implementation', 'outputs': [{'name': '$', 'type': 'address'}], 'stateMutability': 'view', 'type': 'function'},
+    {'inputs': [{'name': 'owners', 'type': 'bytes[]'}], 'name': 'initialize', 'outputs': [], 'stateMutability': 'payable', 'type': 'function'},
+    {'inputs': [{'name': 'account', 'type': 'address'}], 'name': 'isOwnerAddress', 'outputs': [{'name': '', 'type': 'bool'}], 'stateMutability': 'view', 'type': 'function'},
+    {'inputs': [{'name': 'account', 'type': 'bytes'}], 'name': 'isOwnerBytes', 'outputs': [{'name': '', 'type': 'bool'}], 'stateMutability': 'view', 'type': 'function'},
+    {
+        'inputs': [{'name': 'x', 'type': 'bytes32'}, {'name': 'y', 'type': 'bytes32'}],
+        'name': 'isOwnerPublicKey',
+        'outputs': [{'name': '', 'type': 'bool'}],
+        'stateMutability': 'view',
+        'type': 'function',
+    },
+    {
+        'inputs': [{'name': 'hash', 'type': 'bytes32'}, {'name': 'signature', 'type': 'bytes'}],
+        'name': 'isValidSignature',
+        'outputs': [{'name': 'result', 'type': 'bytes4'}],
+        'stateMutability': 'view',
+        'type': 'function',
+    },
+    {'inputs': [], 'name': 'nextOwnerIndex', 'outputs': [{'name': '', 'type': 'uint256'}], 'stateMutability': 'view', 'type': 'function'},
+    {'inputs': [{'name': 'index', 'type': 'uint256'}], 'name': 'ownerAtIndex', 'outputs': [{'name': '', 'type': 'bytes'}], 'stateMutability': 'view', 'type': 'function'},
+    {'inputs': [], 'name': 'ownerCount', 'outputs': [{'name': '', 'type': 'uint256'}], 'stateMutability': 'view', 'type': 'function'},
+    {'inputs': [], 'name': 'proxiableUUID', 'outputs': [{'name': '', 'type': 'bytes32'}], 'stateMutability': 'view', 'type': 'function'},
+    {'inputs': [{'name': 'index', 'type': 'uint256'}, {'name': 'owner', 'type': 'bytes'}], 'name': 'removeLastOwner', 'outputs': [], 'stateMutability': 'nonpayable', 'type': 'function'},
+    {'inputs': [{'name': 'index', 'type': 'uint256'}, {'name': 'owner', 'type': 'bytes'}], 'name': 'removeOwnerAtIndex', 'outputs': [], 'stateMutability': 'nonpayable', 'type': 'function'},
+    {'inputs': [], 'name': 'removedOwnersCount', 'outputs': [{'name': '', 'type': 'uint256'}], 'stateMutability': 'view', 'type': 'function'},
+    {'inputs': [{'name': 'hash', 'type': 'bytes32'}], 'name': 'replaySafeHash', 'outputs': [{'name': '', 'type': 'bytes32'}], 'stateMutability': 'view', 'type': 'function'},
+    {'inputs': [{'name': 'newImplementation', 'type': 'address'}, {'name': 'data', 'type': 'bytes'}], 'name': 'upgradeToAndCall', 'outputs': [], 'stateMutability': 'payable', 'type': 'function'},
+    {
+        'inputs': [
+            {
+                'components': [
+                    {'name': 'sender', 'type': 'address'},
+                    {'name': 'nonce', 'type': 'uint256'},
+                    {'name': 'initCode', 'type': 'bytes'},
+                    {'name': 'callData', 'type': 'bytes'},
+                    {'name': 'callGasLimit', 'type': 'uint256'},
+                    {'name': 'verificationGasLimit', 'type': 'uint256'},
+                    {'name': 'preVerificationGas', 'type': 'uint256'},
+                    {'name': 'maxFeePerGas', 'type': 'uint256'},
+                    {'name': 'maxPriorityFeePerGas', 'type': 'uint256'},
+                    {'name': 'paymasterAndData', 'type': 'bytes'},
+                    {'name': 'signature', 'type': 'bytes'},
+                ],
+                'name': 'userOp',
+                'type': 'tuple',
+            },
+            {'name': 'userOpHash', 'type': 'bytes32'},
+            {'name': 'missingAccountFunds', 'type': 'uint256'},
+        ],
+        'name': 'validateUserOp',
+        'outputs': [{'name': 'validationData', 'type': 'uint256'}],
+        'stateMutability': 'nonpayable',
+        'type': 'function',
+    },
+    {'stateMutability': 'payable', 'type': 'receive'},
+]
+COINBASE_ENTRYPOINT_ADDRESS = '0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789'
+COINBASE_USER_OPERATION_EVENT_TOPIC = '0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f'
+COINBASE_IS_USER_OPERATION_EVENT_PRECEDING_EVENTS = False
+COINBASE_ENTRYPOINT_REPLAYABLE_NONCE_KEY = 8453
+COINBASE_NONCE_TRACKER_ADDRESS = '0xD0Ff13c28679FDd75Bc09c0a430a0089bf8b95a8'
+COINBASE_SMART_WALLET_IMPLEMENTATION_ADDRESS = '0x000100abaad02f1cfC8Bbe32bD5a564817339E72'
+COINBASE_SMART_WALLET_VALIDATOR_ADDRESS = '0x79A33f950b90C7d07E66950daedf868BD0cDcF96'
+COINBASE_ERC1967_IMPLEMENTATION_SLOT = '0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc'
+COINBASE_EIP7702PROXY_ADDRESS = '0x7702cb554e6bFb442cb743A7dF23154544a7176C'
+EIP7702_MAGIC_PREFIX = '0xef0100'
+COINBASE_EIP7702PROXY_EXPECTED_BYTECODE = f'{EIP7702_MAGIC_PREFIX}{COINBASE_EIP7702PROXY_ADDRESS.lower().replace("0x", "", 1)}'
+COINBASE_EIP7702PROXY_IMPLEMENTATION_SET_TYPEHASH = 'EIP7702ProxyImplementationSet(uint256 chainId,address proxy,uint256 nonce,address currentImplementation,address newImplementation,bytes callData,address validator,uint256 expiry)'
+MAX_UINT256 = (2**256) - 1

@@ -1,0 +1,11 @@
+.swap-widget-container ul li:before {
+  content: none !important;
+}
+
+.swap-widget-container ul {
+  width: 90%;
+}
+
+.swap-widget-container .MuiButton-textPrimary {
+  color: var(--kiba-color-text) !important;
+}
