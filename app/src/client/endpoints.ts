@@ -48,7 +48,7 @@ export class GetUserConfigResponse extends ResponseData {
 
   public static fromObject = (obj: RawObject): GetUserConfigResponse => {
     return new GetUserConfigResponse(
-      Resources.UserConfig.fromObject(obj.userConfig as RawObject),
+      Resources.UserConfig.fromObject(obj.user_config as RawObject),
     );
   };
 }
@@ -88,15 +88,19 @@ export class CreatePositionRequest extends RequestData {
     readonly collateralAssetAddress: string,
     readonly collateralAmount: string,
     readonly targetLtv: number,
+    readonly agentName: string,
+    readonly agentEmoji: string,
   ) {
     super();
   }
 
   public toObject = (): RawObject => {
     return {
-      collateralAssetAddress: this.collateralAssetAddress,
-      collateralAmount: this.collateralAmount,
-      targetLtv: this.targetLtv,
+      collateral_asset_address: this.collateralAssetAddress,
+      collateral_amount: this.collateralAmount,
+      target_ltv: this.targetLtv,
+      agent_name: this.agentName,
+      agent_emoji: this.agentEmoji,
     };
   };
 }
@@ -104,6 +108,7 @@ export class CreatePositionRequest extends RequestData {
 export class CreatePositionResponse extends ResponseData {
   public constructor(
     readonly position: Resources.Position,
+    readonly agent: Resources.Agent,
   ) {
     super();
   }
@@ -111,6 +116,7 @@ export class CreatePositionResponse extends ResponseData {
   public static fromObject = (obj: RawObject): CreatePositionResponse => {
     return new CreatePositionResponse(
       Resources.Position.fromObject(obj.position as RawObject),
+      Resources.Agent.fromObject(obj.agent as RawObject),
     );
   };
 }
@@ -155,16 +161,19 @@ export class WithdrawRequest extends RequestData {
 
 export class WithdrawResponse extends ResponseData {
   public constructor(
-    readonly position: Resources.Position,
-    readonly transactionHash: string,
+    readonly transactions: Resources.TransactionCall[],
+    readonly withdrawAmount: string,
+    readonly vaultAddress: string,
   ) {
     super();
   }
 
   public static fromObject = (obj: RawObject): WithdrawResponse => {
+    const transactions = (obj.transactions as RawObject[]).map(Resources.TransactionCall.fromObject);
     return new WithdrawResponse(
-      Resources.Position.fromObject(obj.position as RawObject),
-      String(obj.transactionHash),
+      transactions,
+      String(obj.withdraw_amount),
+      String(obj.vault_address),
     );
   };
 }
@@ -181,14 +190,25 @@ export class ClosePositionRequest extends RequestData {
 
 export class ClosePositionResponse extends ResponseData {
   public constructor(
-    readonly transactionHash: string,
+    readonly transactions: Resources.TransactionCall[],
+    readonly collateralAmount: string,
+    readonly repayAmount: string,
+    readonly vaultWithdrawAmount: string,
+    readonly morphoAddress: string,
+    readonly vaultAddress: string,
   ) {
     super();
   }
 
   public static fromObject = (obj: RawObject): ClosePositionResponse => {
+    const transactions = (obj.transactions as RawObject[]).map(Resources.TransactionCall.fromObject);
     return new ClosePositionResponse(
-      String(obj.transactionHash),
+      transactions,
+      String(obj.collateral_amount),
+      String(obj.repay_amount),
+      String(obj.vault_withdraw_amount),
+      String(obj.morpho_address),
+      String(obj.vault_address),
     );
   };
 }
@@ -252,9 +272,9 @@ export class GetPositionTransactionsRequest extends RequestData {
 
   public toObject = (): RawObject => {
     return {
-      collateralAssetAddress: this.collateralAssetAddress,
-      collateralAmount: this.collateralAmount,
-      targetLtv: this.targetLtv,
+      collateral_asset_address: this.collateralAssetAddress,
+      collateral_amount: this.collateralAmount,
+      target_ltv: this.targetLtv,
     };
   };
 }
@@ -285,43 +305,41 @@ export class TelegramLoginUrlRequest extends RequestData {
 
 export class TelegramLoginUrlResponse extends ResponseData {
   public constructor(
-    readonly loginUrl: string,
+    readonly botUsername: string,
   ) {
     super();
   }
 
   public static fromObject = (obj: RawObject): TelegramLoginUrlResponse => {
     return new TelegramLoginUrlResponse(
-      String(obj.login_url),
+      String(obj.bot_username),
     );
   };
 }
 
-export class VerifyTelegramCodeRequest extends RequestData {
+export class TelegramSecretVerifyRequest extends RequestData {
   public constructor(
-    readonly secretCode: string,
-    readonly authData: Record<string, string | null>,
+    readonly telegramSecret: string,
   ) {
     super();
   }
 
   public toObject = (): RawObject => {
     return {
-      secret_code: this.secretCode,
-      auth_data: this.authData,
+      telegram_secret: this.telegramSecret,
     };
   };
 }
 
-export class VerifyTelegramCodeResponse extends ResponseData {
+export class TelegramSecretVerifyResponse extends ResponseData {
   public constructor(
     readonly userConfig: Resources.UserConfig,
   ) {
     super();
   }
 
-  public static fromObject = (obj: RawObject): VerifyTelegramCodeResponse => {
-    return new VerifyTelegramCodeResponse(
+  public static fromObject = (obj: RawObject): TelegramSecretVerifyResponse => {
+    return new TelegramSecretVerifyResponse(
       Resources.UserConfig.fromObject(obj.user_config as RawObject),
     );
   };

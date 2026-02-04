@@ -30,8 +30,8 @@
 
   // Core Colors
   --kiba-color-background: #050505;
-  --kiba-color-brand-primary: #69F0AE;
-  --kiba-color-brand-secondary: #3B82F6;
+  --kiba-color-brand-primary: #FFA166;
+  --kiba-color-brand-secondary: #FDDB7C;
   --kiba-color-success: #22c55e;
   --kiba-color-warning: #f59e0b;
   --kiba-color-error: #ef4444;
@@ -53,8 +53,6 @@
   @media (prefers-color-scheme: light) {
     // Core Colors
     --kiba-color-background: #FFFFFF;
-    --kiba-color-brand-primary: #34D399;
-    --kiba-color-brand-secondary: #66CCFF;
     --kiba-color-success: #22c55e;
     --kiba-color-warning: #b58108;
     --kiba-color-error: #ef4444;

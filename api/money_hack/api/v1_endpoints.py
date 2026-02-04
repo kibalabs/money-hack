@@ -1,7 +1,7 @@
 from pydantic import BaseModel
+from pydantic import ConfigDict
 
 from money_hack.api import v1_resources as resources
-from money_hack.external.telegram_client import TelegramAuthData
 
 
 class GetSupportedCollateralsRequest(BaseModel):
@@ -41,10 +41,13 @@ class CreatePositionRequest(BaseModel):
     collateral_asset_address: str
     collateral_amount: str
     target_ltv: float
+    agent_name: str
+    agent_emoji: str
 
 
 class CreatePositionResponse(BaseModel):
     position: resources.Position
+    agent: resources.Agent
 
 
 class WithdrawRequest(BaseModel):
@@ -52,8 +55,9 @@ class WithdrawRequest(BaseModel):
 
 
 class WithdrawResponse(BaseModel):
-    position: resources.Position
-    transaction_hash: str
+    transactions: list[resources.TransactionCall]
+    withdraw_amount: str
+    vault_address: str
 
 
 class ClosePositionRequest(BaseModel):
@@ -61,7 +65,12 @@ class ClosePositionRequest(BaseModel):
 
 
 class ClosePositionResponse(BaseModel):
-    transaction_hash: str
+    transactions: list[resources.TransactionCall]
+    collateral_amount: str
+    repay_amount: str
+    vault_withdraw_amount: str
+    morpho_address: str
+    vault_address: str
 
 
 class GetMarketDataRequest(BaseModel):
@@ -102,17 +111,23 @@ class GetTelegramLoginUrlRequest(BaseModel):
 
 
 class GetTelegramLoginUrlResponse(BaseModel):
-    login_url: str
-    secret_code: str
+    bot_username: str
 
 
-class VerifyTelegramCodeRequest(BaseModel):
-    secret_code: str
-    auth_data: TelegramAuthData
+class TelegramSecretVerifyRequest(BaseModel):
+    telegram_secret: str
 
 
-class VerifyTelegramCodeResponse(BaseModel):
+class TelegramSecretVerifyResponse(BaseModel):
     user_config: resources.UserConfig
+
+
+class TelegramWebhookRequest(BaseModel):
+    model_config = ConfigDict(extra='allow')
+
+
+class TelegramWebhookResponse(BaseModel):
+    pass
 
 
 class DisconnectTelegramRequest(BaseModel):
@@ -121,3 +136,29 @@ class DisconnectTelegramRequest(BaseModel):
 
 class DisconnectTelegramResponse(BaseModel):
     user_config: resources.UserConfig
+
+
+class CheckEnsNameRequest(BaseModel):
+    label: str
+
+
+class CheckEnsNameResponse(BaseModel):
+    label: str
+    full_name: str
+    available: bool
+    error: str | None = None
+
+
+class GetEnsConfigTransactionsRequest(BaseModel):
+    collateral: str | None = None
+    target_ltv: int | None = None
+    max_ltv: int | None = None
+    min_ltv: int | None = None
+    auto_rebalance: bool = True
+    risk_tolerance: str = 'medium'
+    description: str | None = None
+
+
+class GetEnsConfigTransactionsResponse(BaseModel):
+    transactions: list[resources.TransactionCall]
+    ens_name: str

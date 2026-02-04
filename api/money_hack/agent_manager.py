@@ -1,8 +1,10 @@
 import base64
+import typing
 from datetime import UTC
 from datetime import datetime
 
 from core import logging
+from core.exceptions import NotFoundException
 from core.exceptions import UnauthorizedException
 from core.requester import Requester
 from core.util import chain_util
@@ -16,22 +18,29 @@ from web3 import Web3
 
 from money_hack import constants
 from money_hack.api.authorizer import Authorizer
+from money_hack.api.v1_resources import Agent as AgentResource
 from money_hack.api.v1_resources import AssetBalance
 from money_hack.api.v1_resources import AuthToken
+from money_hack.api.v1_resources import ClosePositionTransactionsData
 from money_hack.api.v1_resources import CollateralAsset
 from money_hack.api.v1_resources import CollateralMarketData
 from money_hack.api.v1_resources import Position
 from money_hack.api.v1_resources import PositionTransactionsData
+from money_hack.api.v1_resources import TransactionCall
 from money_hack.api.v1_resources import UserConfig
 from money_hack.api.v1_resources import Wallet
+from money_hack.api.v1_resources import WithdrawTransactionsData
 from money_hack.blockchain_data.alchemy_client import AlchemyClient
 from money_hack.blockchain_data.moralis_client import MoralisClient
-from money_hack.external.telegram_client import TelegramAuthData
+from money_hack.external.ens_client import EnsAgentConfig
+from money_hack.external.ens_client import EnsClient
 from money_hack.external.telegram_client import TelegramClient
 from money_hack.forty_acres.forty_acres_client import FortyAcresClient
 from money_hack.morpho.morpho_client import MorphoClient
 from money_hack.morpho.transaction_builder import TransactionBuilder
-from money_hack.store.file_store import FileStore
+from money_hack.store.database_store import DatabaseStore
+
+JsonObject = dict[str, object]
 
 w3 = Web3()
 
@@ -64,7 +73,8 @@ class AgentManager(Authorizer):
         morphoClient: MorphoClient,
         fortyAcresClient: FortyAcresClient,
         telegramClient: TelegramClient,
-        fileStore: FileStore,
+        ensClient: EnsClient,
+        databaseStore: DatabaseStore,
     ) -> None:
         self.chainId = chainId
         self.requester = requester
@@ -74,7 +84,8 @@ class AgentManager(Authorizer):
         self.morphoClient = morphoClient
         self.fortyAcresClient = fortyAcresClient
         self.telegramClient = telegramClient
-        self.fileStore = fileStore
+        self.ensClient = ensClient
+        self.databaseStore = databaseStore
         self._signatureSignerMap: dict[str, str] = {}
         self._positionsCache: dict[str, Position] = {}
         self._userConfigsCache: dict[str, UserConfig] = {}
@@ -133,8 +144,9 @@ class AgentManager(Authorizer):
         normalized_address = chain_util.normalize_address(user_address)
         if normalized_address in self._userConfigsCache:
             return self._userConfigsCache[normalized_address]
-        config = await self.fileStore.load_user_config(normalized_address)
-        if config is not None:
+        user = await self.databaseStore.get_user_by_wallet(walletAddress=normalized_address)
+        if user is not None:
+            config = UserConfig(telegram_handle=user.telegramUsername, telegram_chat_id=user.telegramChatId, preferred_ltv=0.75)
             self._userConfigsCache[normalized_address] = config
             return config
         return UserConfig(telegram_handle=None, telegram_chat_id=None, preferred_ltv=0.75)
@@ -142,30 +154,30 @@ class AgentManager(Authorizer):
     async def update_user_config(self, user_address: str, telegram_handle: str | None, preferred_ltv: float | None) -> UserConfig:
         normalized_address = chain_util.normalize_address(user_address)
         currentConfig = await self.get_user_config(user_address=normalized_address)
+        user = await self.databaseStore.get_or_create_user_by_wallet(walletAddress=normalized_address)
+        telegramChatId = str(currentConfig.telegram_chat_id) if currentConfig.telegram_chat_id is not None else None
+        await self.databaseStore.update_user_telegram(
+            userId=user.userId,
+            telegramId=user.telegramId,
+            telegramChatId=telegramChatId,
+            telegramUsername=telegram_handle,
+        )
         config = UserConfig(telegram_handle=telegram_handle, telegram_chat_id=currentConfig.telegram_chat_id, preferred_ltv=preferred_ltv)
         self._userConfigsCache[normalized_address] = config
-        await self.fileStore.save_user_config(normalized_address, config)
         return config
 
-    async def create_position(self, user_address: str, collateral_asset_address: str, collateral_amount: str, target_ltv: float) -> Position:
+    async def create_position(self, user_address: str, collateral_asset_address: str, collateral_amount: str, target_ltv: float, agent_name: str, agent_emoji: str) -> tuple[Position, AgentResource]:
         collateral = next((c for c in SUPPORTED_COLLATERALS if c.address.lower() == collateral_asset_address.lower()), SUPPORTED_COLLATERALS[0])
-
-        # Get real price for the collateral asset
         try:
             price_usd = await self._get_asset_price(assetAddress=collateral_asset_address)
-            # Convert collateral_amount (raw) to human readable using decimals
             collateral_amount_human = int(collateral_amount) / (10**collateral.decimals)
             collateral_value = collateral_amount_human * price_usd
             logging.info(f'Price for {collateral.symbol}: ${price_usd:.2f}, collateral value: ${collateral_value:.2f}')
         except Exception:  # noqa: BLE001
             logging.exception(f'Failed to fetch price for {collateral_asset_address}, using fallback')
-            # Fallback to hardcoded value if price fetch fails
             collateral_value = 100000.0
-
         borrow_value = collateral_value * target_ltv
         normalized_address = chain_util.normalize_address(user_address)
-
-        # Get current yield APY for estimated_apy
         estimated_apy = 0.08
         try:
             yield_apy = await self.fortyAcresClient.get_yield_apy(chainId=self.chainId)
@@ -173,7 +185,21 @@ class AgentManager(Authorizer):
                 estimated_apy = yield_apy
         except Exception:  # noqa: BLE001
             logging.exception('Failed to get yield APY for position')
-
+        user = await self.databaseStore.get_or_create_user_by_wallet(walletAddress=normalized_address)
+        agent = await self.databaseStore.create_agent(userId=user.userId, name=agent_name, emoji=agent_emoji)
+        market = await self.morphoClient.get_market(chain_id=self.chainId, collateral_address=collateral_asset_address)
+        morphoMarketId = market.unique_key if market else ''
+        borrowAmountRaw = int(borrow_value * 1e6)
+        vaultSharesRaw = borrowAmountRaw
+        await self.databaseStore.create_position(
+            agentId=agent.agentId,
+            collateralAsset=collateral_asset_address,
+            collateralAmount=int(collateral_amount),
+            borrowAmount=borrowAmountRaw,
+            targetLtv=target_ltv,
+            vaultShares=vaultSharesRaw,
+            morphoMarketId=morphoMarketId,
+        )
         position = Position(
             position_id=f'pos-{user_address[:8]}',
             created_date=datetime.now(tz=UTC),
@@ -181,64 +207,99 @@ class AgentManager(Authorizer):
             collateral_asset=collateral,
             collateral_amount=collateral_amount,
             collateral_value_usd=collateral_value,
-            borrow_amount=str(int(borrow_value * 1e6)),
+            borrow_amount=str(borrowAmountRaw),
             borrow_value_usd=borrow_value,
             current_ltv=target_ltv,
             target_ltv=target_ltv,
             health_factor=1.0 / target_ltv,
-            vault_balance=str(int(borrow_value * 1e6)),
+            vault_balance=str(borrowAmountRaw),
             vault_balance_usd=borrow_value,
             accrued_yield='0',
             accrued_yield_usd=0.0,
             estimated_apy=estimated_apy,
             status='active',
         )
-
         self._positionsCache[normalized_address] = position
-        await self.fileStore.save_position(normalized_address, position)
-        logging.info(f'Created position for {normalized_address}: {position.position_id}')
-        return position
+        agentResource = AgentResource(
+            agent_id=agent.agentId,
+            name=agent.name,
+            emoji=agent.emoji,
+            agent_index=agent.agentIndex,
+            ens_name=agent.ensName,
+            created_date=agent.createdDate,
+        )
+        logging.info(f'Created position for {normalized_address}: {position.position_id}, agent: {agent.name}')
+        return position, agentResource
 
     async def get_position(self, user_address: str) -> Position | None:
         normalized_address = chain_util.normalize_address(user_address)
         position = self._positionsCache.get(normalized_address)
         if position is None:
-            position = await self.fileStore.load_position(normalized_address)
-            if position is not None:
-                self._positionsCache[normalized_address] = position
-        if position is None:
-            return None
-
-        # Refresh position data with current prices
-        try:
-            price_usd = await self._get_asset_price(assetAddress=position.collateral_asset.address)
-            collateral_amount_human = int(position.collateral_amount) / (10**position.collateral_asset.decimals)
-            collateral_value = collateral_amount_human * price_usd
-
-            # Recalculate LTV based on current collateral value
-            borrow_value = position.borrow_value_usd
-            current_ltv = borrow_value / collateral_value if collateral_value > 0 else 0
-
-            # Get current market data for max LTV
-            market = await self.morphoClient.get_market(
-                chain_id=self.chainId,
-                collateral_address=position.collateral_asset.address,
+            user = await self.databaseStore.get_user_by_wallet(walletAddress=normalized_address)
+            if user is None:
+                return None
+            agents = await self.databaseStore.get_agents_by_user(userId=user.userId)
+            if not agents:
+                return None
+            agent = agents[0]
+            dbPosition = await self.databaseStore.get_position_by_agent(agentId=agent.agentId)
+            if dbPosition is None:
+                return None
+            collateral = next((c for c in SUPPORTED_COLLATERALS if c.address.lower() == dbPosition.collateralAsset.lower()), SUPPORTED_COLLATERALS[0])
+            collateralAmountHuman = dbPosition.collateralAmount / (10**collateral.decimals)
+            borrowValueUsd = dbPosition.borrowAmount / 1e6
+            try:
+                priceUsd = await self._get_asset_price(assetAddress=dbPosition.collateralAsset)
+                collateralValueUsd = collateralAmountHuman * priceUsd
+            except Exception:  # noqa: BLE001
+                collateralValueUsd = 100000.0
+            estimatedApy = 0.08
+            try:
+                yieldApy = await self.fortyAcresClient.get_yield_apy(chainId=self.chainId)
+                if yieldApy is not None:
+                    estimatedApy = yieldApy
+            except Exception:  # noqa: BLE001
+                logging.debug('Failed to get yield APY, using default')
+            position = Position(
+                position_id=f'pos-{normalized_address[:8]}',
+                created_date=dbPosition.createdDate,
+                user_address=normalized_address,
+                collateral_asset=collateral,
+                collateral_amount=str(dbPosition.collateralAmount),
+                collateral_value_usd=collateralValueUsd,
+                borrow_amount=str(dbPosition.borrowAmount),
+                borrow_value_usd=borrowValueUsd,
+                current_ltv=borrowValueUsd / collateralValueUsd if collateralValueUsd > 0 else 0,
+                target_ltv=dbPosition.targetLtv,
+                health_factor=0.86 / (borrowValueUsd / collateralValueUsd) if collateralValueUsd > 0 else 999,
+                vault_balance=str(dbPosition.vaultShares),
+                vault_balance_usd=dbPosition.vaultShares / 1e6,
+                accrued_yield='0',
+                accrued_yield_usd=0.0,
+                estimated_apy=estimatedApy,
+                status=dbPosition.status,
             )
-            max_ltv = market.lltv if market else 0.86
-
-            # Update position with current values
-            updated_position = Position(
+            self._positionsCache[normalized_address] = position
+        try:
+            priceUsd = await self._get_asset_price(assetAddress=position.collateral_asset.address)
+            collateralAmountHuman = int(position.collateral_amount) / (10**position.collateral_asset.decimals)
+            collateralValue = collateralAmountHuman * priceUsd
+            borrowValue = position.borrow_value_usd
+            currentLtv = borrowValue / collateralValue if collateralValue > 0 else 0
+            market = await self.morphoClient.get_market(chain_id=self.chainId, collateral_address=position.collateral_asset.address)
+            maxLtv = market.lltv if market else 0.86
+            updatedPosition = Position(
                 position_id=position.position_id,
                 created_date=position.created_date,
                 user_address=position.user_address,
                 collateral_asset=position.collateral_asset,
                 collateral_amount=position.collateral_amount,
-                collateral_value_usd=collateral_value,
+                collateral_value_usd=collateralValue,
                 borrow_amount=position.borrow_amount,
-                borrow_value_usd=borrow_value,
-                current_ltv=current_ltv,
+                borrow_value_usd=borrowValue,
+                current_ltv=currentLtv,
                 target_ltv=position.target_ltv,
-                health_factor=max_ltv / current_ltv if current_ltv > 0 else 999,
+                health_factor=maxLtv / currentLtv if currentLtv > 0 else 999,
                 vault_balance=position.vault_balance,
                 vault_balance_usd=position.vault_balance_usd,
                 accrued_yield=position.accrued_yield,
@@ -250,9 +311,8 @@ class AgentManager(Authorizer):
             logging.exception('Failed to refresh position data')
             return position
         else:
-            self._positionsCache[normalized_address] = updated_position
-            await self.fileStore.save_position(normalized_address, updated_position)
-            return updated_position
+            self._positionsCache[normalized_address] = updatedPosition
+            return updatedPosition
 
     async def get_market_data(self) -> tuple[list[CollateralMarketData], float, str, str]:
         collateralMarkets: list[CollateralMarketData] = []
@@ -278,11 +338,71 @@ class AgentManager(Authorizer):
             raise ValueError('Failed to get Yo.xyz yield APY')
         return collateralMarkets, yieldApy, YO_VAULT_ADDRESS, YO_VAULT_NAME
 
-    async def withdraw_usdc(self, user_address: str, amount: str) -> tuple[Position, str]:
-        raise NotImplementedError('withdraw_usdc not implemented')
+    async def get_withdraw_transactions(self, user_address: str, amount: str) -> WithdrawTransactionsData:
+        """Build transactions for partial withdrawal from vault (keeps position open)."""
+        normalizedAddress = chain_util.normalize_address(user_address)
+        user = await self.databaseStore.get_user_by_wallet(walletAddress=normalizedAddress)
+        if user is None:
+            raise NotFoundException(message='User not found')
+        agents = await self.databaseStore.get_agents_by_user(userId=user.userId)
+        if not agents:
+            raise NotFoundException(message='No agents found')
+        agent = agents[0]
+        dbPosition = await self.databaseStore.get_position_by_agent(agentId=agent.agentId)
+        if dbPosition is None:
+            raise NotFoundException(message='No active position found')
+        withdrawAmount = int(amount)
+        if withdrawAmount > dbPosition.vaultShares:
+            raise ValueError(f'Requested withdrawal {withdrawAmount} exceeds vault balance {dbPosition.vaultShares}')
+        usdcAddress = constants.CHAIN_USDC_MAP.get(self.chainId)
+        if usdcAddress is None:
+            raise ValueError(f'USDC not supported on chain {self.chainId}')
+        transactionBuilder = TransactionBuilder(chainId=self.chainId, usdcAddress=usdcAddress, yoVaultAddress=YO_VAULT_ADDRESS)
+        transactions = transactionBuilder.build_withdraw_transactions(user_address=normalizedAddress, withdraw_amount=withdrawAmount)
+        logging.info(f'Built withdraw transactions for {normalizedAddress}: {withdrawAmount} USDC')
+        return WithdrawTransactionsData(transactions=transactions, withdraw_amount=str(withdrawAmount), vault_address=YO_VAULT_ADDRESS)
 
-    async def close_position(self, user_address: str) -> str:  # noqa: ARG002
-        return '0x' + '0' * 64
+    async def get_close_position_transactions(self, user_address: str) -> ClosePositionTransactionsData:
+        """Build transactions to fully close a position: withdraw from vault, repay debt, withdraw collateral."""
+        normalizedAddress = chain_util.normalize_address(user_address)
+        user = await self.databaseStore.get_user_by_wallet(walletAddress=normalizedAddress)
+        if user is None:
+            raise NotFoundException(message='User not found')
+        agents = await self.databaseStore.get_agents_by_user(userId=user.userId)
+        if not agents:
+            raise NotFoundException(message='No agents found')
+        agent = agents[0]
+        dbPosition = await self.databaseStore.get_position_by_agent(agentId=agent.agentId)
+        if dbPosition is None:
+            raise NotFoundException(message='No active position found')
+        market = await self.morphoClient.get_market(chain_id=self.chainId, collateral_address=dbPosition.collateralAsset)
+        if market is None:
+            raise ValueError(f'No Morpho market found for collateral {dbPosition.collateralAsset}')
+        usdcAddress = constants.CHAIN_USDC_MAP.get(self.chainId)
+        if usdcAddress is None:
+            raise ValueError(f'USDC not supported on chain {self.chainId}')
+        vaultWithdrawAmount = dbPosition.vaultShares
+        repayAmount = dbPosition.borrowAmount
+        collateralAmount = dbPosition.collateralAmount
+        transactionBuilder = TransactionBuilder(chainId=self.chainId, usdcAddress=usdcAddress, yoVaultAddress=YO_VAULT_ADDRESS)
+        transactions = transactionBuilder.build_close_position_transactions_from_market(
+            user_address=normalizedAddress,
+            collateral_address=dbPosition.collateralAsset,
+            collateral_amount=collateralAmount,
+            repay_amount=repayAmount,
+            vault_withdraw_amount=vaultWithdrawAmount,
+            market=market,
+            needs_usdc_approval=True,
+        )
+        logging.info(f'Built close position transactions for {normalizedAddress}: vault_withdraw={vaultWithdrawAmount}, repay={repayAmount}, collateral={collateralAmount}')
+        return ClosePositionTransactionsData(
+            transactions=transactions,
+            collateral_amount=str(collateralAmount),
+            repay_amount=str(repayAmount),
+            vault_withdraw_amount=str(vaultWithdrawAmount),
+            morpho_address=transactionBuilder.morphoAddress,
+            vault_address=YO_VAULT_ADDRESS,
+        )
 
     async def get_wallet(self, wallet_address: str) -> Wallet:
         walletAddress = chain_util.normalize_address(wallet_address)
@@ -344,33 +464,119 @@ class AgentManager(Authorizer):
             needs_approval=True,
         )
 
-    async def get_telegram_login_url(self, user_address: str) -> tuple[str, str]:
-        loginUrl, secretCode = await self.telegramClient.get_login_url()
-        normalizedAddress = chain_util.normalize_address(user_address)
-        await self.fileStore.set(f'telegram_secret:{secretCode}', normalizedAddress)
-        return loginUrl, secretCode
+    async def get_telegram_login_url(self) -> str:
+        botUsername = await self.telegramClient.get_bot_username()
+        return botUsername
 
-    async def verify_telegram_code(self, user_address: str, secretCode: str, authData: TelegramAuthData) -> UserConfig:
-        if not self.telegramClient.verify_telegram_auth(authData):
-            raise UnauthorizedException('Invalid Telegram authentication')
+    async def telegram_secret_verify(self, user_address: str, telegramSecret: str) -> UserConfig:
         normalizedAddress = chain_util.normalize_address(user_address)
-        storedAddress = await self.fileStore.get(f'telegram_secret:{secretCode}')
-        if storedAddress != normalizedAddress:
-            raise UnauthorizedException('Secret code does not match wallet address')
-        if not authData.id:
-            raise UnauthorizedException('Missing Telegram chat ID')
-        await self.telegramClient.link_wallet_to_telegram(walletAddress=normalizedAddress, chatId=authData.id)
-        userConfig = await self.get_user_config(user_address=normalizedAddress)
-        updatedConfig = UserConfig(telegram_handle=authData.username, telegram_chat_id=authData.id, preferred_ltv=userConfig.preferred_ltv)
-        await self.fileStore.set(f'user_config:{normalizedAddress}', updatedConfig.model_dump())
+        loginResult = await self.telegramClient.verify_secret_code(walletAddress=normalizedAddress, secretCode=telegramSecret)
+        user = await self.databaseStore.get_or_create_user_by_wallet(walletAddress=normalizedAddress)
+        await self.databaseStore.update_user_telegram(
+            userId=user.userId,
+            telegramId=loginResult.telegramUsername,
+            telegramChatId=loginResult.chatId,
+            telegramUsername=loginResult.telegramUsername,
+        )
+        await self.telegramClient.send_message(
+            chatId=loginResult.chatId,
+            text=f'✅ Your Telegram account has been linked to wallet {normalizedAddress[:8]}...{normalizedAddress[-6:]}. You will now receive notifications about your BorrowBot positions.',
+        )
+        updatedConfig = UserConfig(telegram_handle=loginResult.telegramUsername, telegram_chat_id=loginResult.chatId, preferred_ltv=0.75)
         self._userConfigsCache[normalizedAddress] = updatedConfig
-        await self.fileStore.delete(f'telegram_secret:{secretCode}')
         return updatedConfig
+
+    async def process_telegram_webhook(self, updateDict: JsonObject) -> None:
+        messageDict = typing.cast(JsonObject | None, updateDict.get('message'))
+        if messageDict is None:
+            logging.warning('Invalid Telegram update format: no message found')
+            return
+        chatId = typing.cast(int | None, typing.cast(JsonObject, messageDict.get('chat', {})).get('id'))
+        if chatId is None:
+            logging.warning('Invalid Telegram update format: no chat_id found')
+            return
+        senderUsername = typing.cast(str | None, typing.cast(JsonObject, messageDict.get('from', {})).get('username'))
+        if senderUsername is None:
+            logging.warning('Telegram message does not have a username set. Cannot proceed.')
+            await self.telegramClient.send_message(
+                chatId=str(chatId),
+                text='Please make sure you have a Telegram username set to use this bot. You can set one in your Telegram settings.',
+            )
+            return
+        messageText = typing.cast(str | None, messageDict.get('text'))
+        if messageText is None:
+            logging.warning('Telegram message has no text content, skipping processing.')
+            return
+        try:
+            user = await self.databaseStore.get_user_by_telegram_id(telegramId=senderUsername)
+            if user.telegramChatId != str(chatId):
+                logging.info(f'Updating Telegram chat ID for user {user.userId} from {user.telegramChatId} to {chatId}')
+                await self.databaseStore.update_user_telegram(
+                    userId=user.userId,
+                    telegramId=senderUsername,
+                    telegramChatId=str(chatId),
+                    telegramUsername=senderUsername,
+                )
+            if messageText.startswith('/start'):
+                await self.telegramClient.send_message(
+                    chatId=str(chatId),
+                    text='Welcome back! Your Telegram is already linked. You will receive notifications about your BorrowBot positions here.',
+                )
+            else:
+                await self.telegramClient.send_message(
+                    chatId=str(chatId),
+                    text='BorrowBot is currently in notification-only mode. Check your positions at the web app.',
+                )
+        except NotFoundException:
+            await self.telegramClient.send_login_message(chatId=str(chatId), senderUsername=senderUsername)
 
     async def disconnect_telegram(self, user_address: str) -> UserConfig:
         normalizedAddress = chain_util.normalize_address(user_address)
-        userConfig = await self.get_user_config(user_address=normalizedAddress)
-        updatedConfig = UserConfig(telegram_handle=None, telegram_chat_id=None, preferred_ltv=userConfig.preferred_ltv)
-        await self.fileStore.set(f'user_config:{normalizedAddress}', updatedConfig.model_dump())
+        user = await self.databaseStore.get_or_create_user_by_wallet(walletAddress=normalizedAddress)
+        await self.databaseStore.update_user_telegram(
+            userId=user.userId,
+            telegramId=None,
+            telegramChatId=None,
+            telegramUsername=None,
+        )
+        updatedConfig = UserConfig(telegram_handle=None, telegram_chat_id=None, preferred_ltv=0.75)
         self._userConfigsCache[normalizedAddress] = updatedConfig
         return updatedConfig
+
+    def check_ens_name_available(self, label: str) -> tuple[bool, str, str | None]:
+        """Check if an ENS subdomain label is available."""
+        isValid, errorMsg = self.ensClient.validate_label(label)
+        if not isValid:
+            return False, self.ensClient.get_full_ens_name(label), errorMsg
+        isAvailable = self.ensClient.check_name_available(label)
+        fullName = self.ensClient.get_full_ens_name(label)
+        return isAvailable, fullName, None if isAvailable else 'Name is already taken'
+
+    def reserve_ens_name(self, label: str) -> str:
+        """Reserve an ENS name and return the full ENS name."""
+        return self.ensClient.reserve_name(label)
+
+    async def get_ens_config_transactions(self, userAddress: str, collateral: str | None, targetLtv: int | None, maxLtv: int | None, minLtv: int | None, autoRebalance: bool, riskTolerance: str, description: str | None) -> tuple[list[TransactionCall], str]:
+        """Get transactions to set ENS text records for agent configuration."""
+        normalizedAddress = chain_util.normalize_address(userAddress)
+        user = await self.databaseStore.get_user_by_wallet(walletAddress=normalizedAddress)
+        if user is None:
+            raise NotFoundException(message='User not found')
+        agents = await self.databaseStore.get_agents_by_user(userId=user.userId)
+        if not agents:
+            raise NotFoundException(message='No agents found for user')
+        agent = agents[0]
+        if not agent.ensName:
+            raise ValueError('Agent does not have an ENS name')
+        config = EnsAgentConfig(
+            collateral=collateral,
+            target_ltv=targetLtv,
+            max_ltv=maxLtv,
+            min_ltv=minLtv,
+            auto_rebalance=autoRebalance,
+            risk_tolerance=riskTolerance,
+            emoji=agent.emoji,
+            description=description,
+        )
+        transactions = self.ensClient.build_set_agent_config_transactions(agent.ensName, config)
+        return transactions, agent.ensName

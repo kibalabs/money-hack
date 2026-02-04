@@ -6,7 +6,7 @@ import { useToastManager } from '@kibalabs/ui-react-toast';
 import { useWeb3Transaction } from '@kibalabs/web3-react';
 
 import { useAuth } from '../AuthContext';
-import { AssetBalance, CollateralAsset, CollateralMarketData, MarketData, PositionTransactions, TransactionCall, Wallet } from '../client/resources';
+import { AssetBalance, CollateralAsset, CollateralMarketData, MarketData, PositionTransactions, TransactionCall, UserConfig, Wallet } from '../client/resources';
 import { useGlobals } from '../GlobalsContext';
 
 import './SetupPage.scss';
@@ -18,6 +18,8 @@ const LTV_OPTIONS = [
   { value: 0.80, label: '80%', description: 'Aggressive' },
 ];
 
+const EMOJI_OPTIONS = ['🤖', '💰', '🚀', '📈', '🏦', '💎', '⚡', '🔥', '🌟', '🎯'];
+
 export function SetupPage(): React.ReactElement {
   const { accountAddress, accountSigner, authToken, isWeb3AccountLoggedIn } = useAuth();
   const { moneyHackClient } = useGlobals();
@@ -25,12 +27,15 @@ export function SetupPage(): React.ReactElement {
   const toastManager = useToastManager();
   const [transactionDetails, setTransactionPromise, _, clearTransaction] = useWeb3Transaction();
 
-  const [step, setStep] = React.useState<'collateral' | 'ltv' | 'deposit' | 'telegram' | 'executing'>('collateral');
+  const [step, setStep] = React.useState<'collateral' | 'ltv' | 'deposit' | 'telegram' | 'agent' | 'executing'>('collateral');
+  const [userConfig, setUserConfig] = React.useState<UserConfig | null>(null);
   const [telegramChatId, setTelegramChatId] = React.useState<string | null>(null);
   const [isTelegramConnecting, setIsTelegramConnecting] = React.useState<boolean>(false);
   const [selectedCollateral, setSelectedCollateral] = React.useState<CollateralAsset | null>(null);
   const [targetLtv, setTargetLtv] = React.useState<number>(0.75);
   const [depositAmount, setDepositAmount] = React.useState<string>('');
+  const [agentName, setAgentName] = React.useState<string>('');
+  const [agentEmoji, setAgentEmoji] = React.useState<string>('🤖');
   const [collaterals, setCollaterals] = React.useState<CollateralAsset[]>([]);
   const [marketData, setMarketData] = React.useState<MarketData | null>(null);
   const [wallet, setWallet] = React.useState<Wallet | null>(null);
@@ -50,25 +55,15 @@ export function SetupPage(): React.ReactElement {
   React.useEffect(() => {
     const handleTelegramCallback = async (): Promise<void> => {
       const params = new URLSearchParams(window.location.search);
-      const secretCode = params.get('telegramSecret');
-      if (!secretCode || !accountAddress || !authToken) return;
+      const telegramSecret = params.get('telegramSecret');
+      if (!telegramSecret || !accountAddress || !authToken) return;
       try {
-        const authData = {
-          id: params.get('id'),
-          first_name: params.get('first_name'),
-          last_name: params.get('last_name'),
-          username: params.get('username'),
-          photo_url: params.get('photo_url'),
-          auth_date: params.get('auth_date'),
-          hash: params.get('hash'),
-        };
-        const filteredAuthData = Object.fromEntries(Object.entries(authData).filter(([, v]) => v != null));
-        const result = await moneyHackClient.verifyTelegramCode(accountAddress, secretCode, filteredAuthData, authToken);
+        const result = await moneyHackClient.telegramSecretVerify(accountAddress, telegramSecret, authToken);
         setTelegramChatId(String(result.telegramChatId));
         toastManager.showTextToast('Telegram connected successfully!', 'success');
         window.history.replaceState({}, document.title, window.location.pathname);
       } catch (error) {
-        console.error('Failed to verify Telegram code:', error);
+        console.error('Failed to verify Telegram secret:', error);
         toastManager.showTextToast('Failed to connect Telegram. Please try again.', 'error');
       }
     };
@@ -80,14 +75,19 @@ export function SetupPage(): React.ReactElement {
       if (!accountAddress || !authToken) return;
       try {
         setIsLoadingCollaterals(true);
-        const [supportedCollaterals, fetchedMarketData, fetchedWallet] = await Promise.all([
+        const [supportedCollaterals, fetchedMarketData, fetchedWallet, fetchedUserConfig] = await Promise.all([
           moneyHackClient.getSupportedCollaterals(authToken),
           moneyHackClient.getMarketData(),
           moneyHackClient.getWallet(accountAddress, authToken),
+          moneyHackClient.getUserConfig(accountAddress, authToken),
         ]);
         setCollaterals(supportedCollaterals);
         setMarketData(fetchedMarketData);
         setWallet(fetchedWallet);
+        setUserConfig(fetchedUserConfig);
+        if (fetchedUserConfig.telegramChatId) {
+          setTelegramChatId(String(fetchedUserConfig.telegramChatId));
+        }
         const firstWithBalance = supportedCollaterals.find((collateral) => {
           const balance = fetchedWallet.assetBalances.find((b) => b.assetAddress.toLowerCase() === collateral.address.toLowerCase());
           return balance && balance.balance > 0n;
@@ -153,26 +153,50 @@ export function SetupPage(): React.ReactElement {
       toastManager.showTextToast('Please enter a valid deposit amount', 'error');
       return;
     }
-    setStep('telegram');
-  }, [depositAmount, toastManager]);
+    if (telegramChatId) {
+      setStep('agent');
+    } else {
+      setStep('telegram');
+    }
+  }, [depositAmount, telegramChatId, toastManager]);
 
   const handleConnectTelegram = React.useCallback(async (): Promise<void> => {
     if (!accountAddress || !authToken) return;
     try {
       setIsTelegramConnecting(true);
-      const loginUrl = await moneyHackClient.getTelegramLoginUrl(accountAddress, authToken);
-      window.location.href = loginUrl;
+      const botUsername = await moneyHackClient.getTelegramBotUsername(accountAddress, authToken);
+      const cleanBotUsername = botUsername.replace('@', '');
+      const userAgent = window.navigator.userAgent;
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(userAgent);
+      if (isMobile) {
+        window.open(`tg://resolve?domain=${cleanBotUsername}`, '_blank');
+      } else {
+        window.open(`https://web.telegram.org/k/#${botUsername}`, '_blank');
+      }
+      setIsTelegramConnecting(false);
     } catch (error) {
-      console.error('Failed to get Telegram login URL:', error);
+      console.error('Failed to get Telegram bot info:', error);
       toastManager.showTextToast('Failed to connect Telegram. Please try again.', 'error');
       setIsTelegramConnecting(false);
     }
   }, [accountAddress, authToken, moneyHackClient, toastManager]);
 
+  const handleTelegramNext = React.useCallback((): void => {
+    if (!telegramChatId) {
+      toastManager.showTextToast('Please connect your Telegram to continue', 'error');
+      return;
+    }
+    setStep('agent');
+  }, [telegramChatId, toastManager]);
+
   const handleCreatePosition = React.useCallback(async (): Promise<void> => {
     if (!accountAddress || !selectedCollateral || !authToken || !accountSigner) return;
     if (!telegramChatId) {
       toastManager.showTextToast('Please connect your Telegram to continue', 'error');
+      return;
+    }
+    if (!agentName.trim()) {
+      toastManager.showTextToast('Please enter a name for your agent', 'error');
       return;
     }
     const amount = parseFloat(depositAmount);
@@ -200,7 +224,7 @@ export function SetupPage(): React.ReactElement {
       toastManager.showTextToast('Failed to prepare position', 'error');
       setIsLoading(false);
     }
-  }, [accountAddress, accountSigner, authToken, selectedCollateral, depositAmount, telegramChatId, targetLtv, moneyHackClient, toastManager]);
+  }, [accountAddress, accountSigner, authToken, selectedCollateral, depositAmount, telegramChatId, agentName, targetLtv, moneyHackClient, toastManager]);
 
   const executeNextTransaction = React.useCallback(async (): Promise<void> => {
     if (!positionTransactions || !accountSigner || currentTxIndex >= positionTransactions.transactions.length) return;
@@ -223,8 +247,8 @@ export function SetupPage(): React.ReactElement {
     try {
       const amount = parseFloat(depositAmount);
       const collateralAmount = BigInt(Math.floor(amount * (10 ** selectedCollateral.decimals)));
-      await moneyHackClient.createPosition(accountAddress, selectedCollateral.address, collateralAmount, targetLtv, authToken);
-      toastManager.showTextToast('Position created successfully!', 'success');
+      const result = await moneyHackClient.createPosition(accountAddress, selectedCollateral.address, collateralAmount, targetLtv, agentName.trim(), agentEmoji, authToken);
+      toastManager.showTextToast(`Agent "${result.agent.name}" created successfully!`, 'success');
       navigator.navigateTo('/agent');
     } catch (error) {
       console.error('Failed to save position:', error);
@@ -232,7 +256,7 @@ export function SetupPage(): React.ReactElement {
     } finally {
       setIsLoading(false);
     }
-  }, [accountAddress, authToken, selectedCollateral, depositAmount, targetLtv, moneyHackClient, toastManager, navigator]);
+  }, [accountAddress, authToken, selectedCollateral, depositAmount, targetLtv, agentName, agentEmoji, moneyHackClient, toastManager, navigator]);
 
   React.useEffect((): void => {
     if (step !== 'executing' || !positionTransactions) return;
@@ -264,13 +288,26 @@ export function SetupPage(): React.ReactElement {
     if (step === 'ltv') setStep('collateral');
     else if (step === 'deposit') setStep('ltv');
     else if (step === 'telegram') setStep('deposit');
-  }, [step]);
+    else if (step === 'agent') {
+      if (telegramChatId && userConfig?.telegramChatId) {
+        setStep('deposit');
+      } else {
+        setStep('telegram');
+      }
+    }
+  }, [step, telegramChatId, userConfig]);
+
+  const getTotalSteps = (): number => {
+    return telegramChatId && userConfig?.telegramChatId ? 4 : 5;
+  };
 
   const getStepNumber = (): string => {
     if (step === 'collateral') return '1';
     if (step === 'ltv') return '2';
     if (step === 'deposit') return '3';
-    return '4';
+    if (step === 'telegram') return '4';
+    if (step === 'agent') return telegramChatId && userConfig?.telegramChatId ? '4' : '5';
+    return '';
   };
 
   const calculateBorrowAmount = (): string => {
@@ -288,7 +325,7 @@ export function SetupPage(): React.ReactElement {
   return (
     <Stack direction={Direction.Vertical} childAlignment={Alignment.Center} contentAlignment={Alignment.Center} shouldAddGutters={true} paddingHorizontal={PaddingSize.Wide2} paddingVertical={PaddingSize.Wide2} isFullHeight={true}>
       <Text variant='header2'>Set Up BorrowBot</Text>
-      <Text variant='note'>{`Step ${getStepNumber()} of 4`}</Text>
+      <Text variant='note'>{`Step ${getStepNumber()} of ${getTotalSteps()}`}</Text>
       <Spacing variant={PaddingSize.Wide} />
 
       {step === 'collateral' && (
@@ -516,11 +553,53 @@ export function SetupPage(): React.ReactElement {
             <Stack.Item growthFactor={1} shrinkFactor={1}>
               <Button
                 variant='primary'
-                text='Create Position'
+                text='Continue'
+                onClicked={handleTelegramNext}
+                isFullWidth={true}
+                isEnabled={!!telegramChatId}
+              />
+            </Stack.Item>
+          </Stack>
+        </Stack>
+      )}
+
+      {step === 'agent' && selectedCollateral && (
+        <Stack direction={Direction.Vertical} childAlignment={Alignment.Center} shouldAddGutters={true} maxWidth='400px' isFullWidth={true}>
+          <Text variant='header3' alignment={TextAlignment.Center}>Name Your Agent</Text>
+          <Spacing />
+          <Text alignment={TextAlignment.Center}>Give your lending agent a name and emoji. This will help you identify it in notifications and on the dashboard.</Text>
+          <Spacing />
+          <Text variant='note'>Agent Name</Text>
+          <SingleLineInput
+            inputType={InputType.Text}
+            value={agentName}
+            onValueChanged={setAgentName}
+            placeholderText='e.g., WETH Yield Bot'
+            inputWrapperVariant='dialogInput'
+          />
+          <Spacing />
+          <Text variant='note'>Choose an icon</Text>
+          <Stack direction={Direction.Horizontal} shouldAddGutters={true} contentAlignment={Alignment.Center} shouldWrapItems={true}>
+            {EMOJI_OPTIONS.map((emoji) => (
+              <Button
+                key={emoji}
+                variant={agentEmoji === emoji ? 'primary' : 'secondary'}
+                text={emoji}
+                onClicked={() => setAgentEmoji(emoji)}
+              />
+            ))}
+          </Stack>
+          <Spacing />
+          <Stack direction={Direction.Horizontal} shouldAddGutters={true} isFullWidth={true}>
+            <Button variant='secondary' text='Back' onClicked={handleBack} />
+            <Stack.Item growthFactor={1} shrinkFactor={1}>
+              <Button
+                variant='primary'
+                text='Create Agent'
                 onClicked={handleCreatePosition}
                 isFullWidth={true}
                 isLoading={isLoading}
-                isEnabled={!!telegramChatId}
+                isEnabled={!!agentName.trim()}
               />
             </Stack.Item>
           </Stack>

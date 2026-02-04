@@ -20,7 +20,7 @@ DATABASE_URL = Database.create_psql_connection_string(
 )
 config.set_main_option("sqlalchemy.url", DATABASE_URL)
 
-from agent_hack.store.schema import metadata
+from money_hack.store.schema import metadata
 target_metadata = metadata
 
 

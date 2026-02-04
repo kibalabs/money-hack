@@ -18,7 +18,7 @@ w3 = Web3()
 def encode_approve(spender: str, amount: int) -> str:
     contract = w3.eth.contract(abi=morpho_abis.ERC20_ABI)
     fn = contract.functions.approve(spender, amount)
-    encoded = fn.build_transaction({'from': '0x0000000000000000000000000000000000000000'})['data']
+    encoded = fn._encode_transaction_data()
     return str(encoded) if isinstance(encoded, (bytes, str)) else encoded
 
 
@@ -40,7 +40,7 @@ def encode_supply_collateral(
     )
     contract = w3.eth.contract(abi=morpho_abis.MORPHO_BLUE_ABI)
     fn = contract.functions.supplyCollateral(market_params, assets, Web3.to_checksum_address(on_behalf), b'')
-    encoded = fn.build_transaction({'from': '0x0000000000000000000000000000000000000000'})['data']
+    encoded = fn._encode_transaction_data()
     return str(encoded) if isinstance(encoded, (bytes, str)) else encoded
 
 
@@ -69,14 +69,71 @@ def encode_borrow(
         Web3.to_checksum_address(on_behalf),
         Web3.to_checksum_address(receiver),
     )
-    encoded = fn.build_transaction({'from': '0x0000000000000000000000000000000000000000'})['data']
+    encoded = fn._encode_transaction_data()
+    return str(encoded) if isinstance(encoded, (bytes, str)) else encoded
+
+
+def encode_repay(
+    loan_token: str,
+    collateral_token: str,
+    oracle: str,
+    irm: str,
+    lltv: int,
+    assets: int,
+    on_behalf: str,
+) -> str:
+    market_params = (
+        Web3.to_checksum_address(loan_token),
+        Web3.to_checksum_address(collateral_token),
+        Web3.to_checksum_address(oracle),
+        Web3.to_checksum_address(irm),
+        lltv,
+    )
+    contract = w3.eth.contract(abi=morpho_abis.MORPHO_BLUE_ABI)
+    fn = contract.functions.repay(market_params, assets, 0, Web3.to_checksum_address(on_behalf), b'')
+    encoded = fn._encode_transaction_data()
+    return str(encoded) if isinstance(encoded, (bytes, str)) else encoded
+
+
+def encode_withdraw_collateral(
+    loan_token: str,
+    collateral_token: str,
+    oracle: str,
+    irm: str,
+    lltv: int,
+    assets: int,
+    on_behalf: str,
+    receiver: str,
+) -> str:
+    market_params = (
+        Web3.to_checksum_address(loan_token),
+        Web3.to_checksum_address(collateral_token),
+        Web3.to_checksum_address(oracle),
+        Web3.to_checksum_address(irm),
+        lltv,
+    )
+    contract = w3.eth.contract(abi=morpho_abis.MORPHO_BLUE_ABI)
+    fn = contract.functions.withdrawCollateral(
+        market_params,
+        assets,
+        Web3.to_checksum_address(on_behalf),
+        Web3.to_checksum_address(receiver),
+    )
+    encoded = fn._encode_transaction_data()
     return str(encoded) if isinstance(encoded, (bytes, str)) else encoded
 
 
 def encode_vault_deposit(assets: int, receiver: str) -> str:
     contract = w3.eth.contract(abi=morpho_abis.ERC4626_VAULT_ABI)
     fn = contract.functions.deposit(assets, Web3.to_checksum_address(receiver))
-    encoded = fn.build_transaction({'from': '0x0000000000000000000000000000000000000000'})['data']
+    encoded = fn._encode_transaction_data()
+    return str(encoded) if isinstance(encoded, (bytes, str)) else encoded
+
+
+def encode_vault_withdraw(assets: int, receiver: str, owner: str) -> str:
+    contract = w3.eth.contract(abi=morpho_abis.ERC4626_VAULT_ABI)
+    fn = contract.functions.withdraw(assets, Web3.to_checksum_address(receiver), Web3.to_checksum_address(owner))
+    encoded = fn._encode_transaction_data()
     return str(encoded) if isinstance(encoded, (bytes, str)) else encoded
 
 
@@ -168,5 +225,205 @@ class TransactionBuilder:
         deposit_calldata = encode_vault_deposit(borrow_amount, user)
         transactions.append(TransactionCall(to=self.yoVaultAddress, data=deposit_calldata))
         logging.info(f'Added vault deposit tx: {borrow_amount} USDC to Yo vault')
+        return transactions
 
+    def build_withdraw_transactions(
+        self,
+        user_address: str,
+        withdraw_amount: int,
+    ) -> list[TransactionCall]:
+        """Build transactions to withdraw USDC from the vault (partial withdrawal, keeps position open)."""
+        user = chain_util.normalize_address(user_address)
+        transactions: list[TransactionCall] = []
+        withdraw_calldata = encode_vault_withdraw(assets=withdraw_amount, receiver=user, owner=user)
+        transactions.append(TransactionCall(to=self.yoVaultAddress, data=withdraw_calldata))
+        logging.info(f'Added vault withdraw tx: {withdraw_amount} USDC from Yo vault')
+        return transactions
+
+    def build_close_position_transactions_from_market(
+        self,
+        user_address: str,
+        collateral_address: str,
+        collateral_amount: int,
+        repay_amount: int,
+        vault_withdraw_amount: int,
+        market: 'MorphoMarket',
+        needs_usdc_approval: bool,
+    ) -> list[TransactionCall]:
+        return self.build_close_position_transactions(
+            user_address=user_address,
+            collateral_address=collateral_address,
+            collateral_amount=collateral_amount,
+            repay_amount=repay_amount,
+            vault_withdraw_amount=vault_withdraw_amount,
+            loan_token=market.loan_address,
+            oracle=market.oracle_address,
+            irm=market.irm_address,
+            lltv=market.lltv_raw,
+            needs_usdc_approval=needs_usdc_approval,
+        )
+
+    def build_close_position_transactions(
+        self,
+        user_address: str,
+        collateral_address: str,
+        collateral_amount: int,
+        repay_amount: int,
+        vault_withdraw_amount: int,
+        loan_token: str,
+        oracle: str,
+        irm: str,
+        lltv: int,
+        needs_usdc_approval: bool,
+    ) -> list[TransactionCall]:
+        """Build transactions to fully close a position: withdraw from vault, repay debt, withdraw collateral."""
+        user = chain_util.normalize_address(user_address)
+        collateral = chain_util.normalize_address(collateral_address)
+        transactions: list[TransactionCall] = []
+        # 1. Withdraw USDC from Yo vault (to get funds to repay)
+        withdraw_calldata = encode_vault_withdraw(assets=vault_withdraw_amount, receiver=user, owner=user)
+        transactions.append(TransactionCall(to=self.yoVaultAddress, data=withdraw_calldata))
+        logging.info(f'Added vault withdraw tx: {vault_withdraw_amount} USDC from Yo vault')
+        # 2. Approve USDC to Morpho for repayment (if needed)
+        if needs_usdc_approval:
+            usdc_approve_calldata = encode_approve(self.morphoAddress, repay_amount)
+            transactions.append(TransactionCall(to=self.usdcAddress, data=usdc_approve_calldata))
+            logging.info(f'Added USDC approval tx: USDC -> Morpho for {repay_amount}')
+        # 3. Repay debt to Morpho
+        repay_calldata = encode_repay(
+            loan_token=loan_token,
+            collateral_token=collateral,
+            oracle=oracle,
+            irm=irm,
+            lltv=lltv,
+            assets=repay_amount,
+            on_behalf=user,
+        )
+        transactions.append(TransactionCall(to=self.morphoAddress, data=repay_calldata))
+        logging.info(f'Added repay tx: {repay_amount} USDC to Morpho')
+        # 4. Withdraw collateral from Morpho
+        withdraw_collateral_calldata = encode_withdraw_collateral(
+            loan_token=loan_token,
+            collateral_token=collateral,
+            oracle=oracle,
+            irm=irm,
+            lltv=lltv,
+            assets=collateral_amount,
+            on_behalf=user,
+            receiver=user,
+        )
+        transactions.append(TransactionCall(to=self.morphoAddress, data=withdraw_collateral_calldata))
+        logging.info(f'Added withdraw collateral tx: {collateral_amount} from Morpho')
+        return transactions
+
+    def build_partial_repay_transactions_from_market(
+        self,
+        user_address: str,
+        collateral_address: str,
+        repay_amount: int,
+        vault_withdraw_amount: int,
+        market: 'MorphoMarket',
+        needs_usdc_approval: bool,
+    ) -> list[TransactionCall]:
+        return self.build_partial_repay_transactions(
+            user_address=user_address,
+            collateral_address=collateral_address,
+            repay_amount=repay_amount,
+            vault_withdraw_amount=vault_withdraw_amount,
+            loan_token=market.loan_address,
+            oracle=market.oracle_address,
+            irm=market.irm_address,
+            lltv=market.lltv_raw,
+            needs_usdc_approval=needs_usdc_approval,
+        )
+
+    def build_partial_repay_transactions(
+        self,
+        user_address: str,
+        collateral_address: str,
+        repay_amount: int,
+        vault_withdraw_amount: int,
+        loan_token: str,
+        oracle: str,
+        irm: str,
+        lltv: int,
+        needs_usdc_approval: bool,
+    ) -> list[TransactionCall]:
+        """Build transactions for partial repay (auto-repay): withdraw from vault, repay debt (no collateral withdrawal)."""
+        user = chain_util.normalize_address(user_address)
+        collateral = chain_util.normalize_address(collateral_address)
+        transactions: list[TransactionCall] = []
+        withdraw_calldata = encode_vault_withdraw(assets=vault_withdraw_amount, receiver=user, owner=user)
+        transactions.append(TransactionCall(to=self.yoVaultAddress, data=withdraw_calldata))
+        logging.info(f'Added vault withdraw tx: {vault_withdraw_amount} USDC from Yo vault')
+        if needs_usdc_approval:
+            usdc_approve_calldata = encode_approve(self.morphoAddress, repay_amount)
+            transactions.append(TransactionCall(to=self.usdcAddress, data=usdc_approve_calldata))
+            logging.info(f'Added USDC approval tx: USDC -> Morpho for {repay_amount}')
+        repay_calldata = encode_repay(
+            loan_token=loan_token,
+            collateral_token=collateral,
+            oracle=oracle,
+            irm=irm,
+            lltv=lltv,
+            assets=repay_amount,
+            on_behalf=user,
+        )
+        transactions.append(TransactionCall(to=self.morphoAddress, data=repay_calldata))
+        logging.info(f'Added repay tx: {repay_amount} USDC to Morpho')
+        return transactions
+
+    def build_auto_borrow_transactions_from_market(
+        self,
+        user_address: str,
+        collateral_address: str,
+        borrow_amount: int,
+        market: 'MorphoMarket',
+        needs_usdc_approval: bool,
+    ) -> list[TransactionCall]:
+        return self.build_auto_borrow_transactions(
+            user_address=user_address,
+            collateral_address=collateral_address,
+            borrow_amount=borrow_amount,
+            loan_token=market.loan_address,
+            oracle=market.oracle_address,
+            irm=market.irm_address,
+            lltv=market.lltv_raw,
+            needs_usdc_approval=needs_usdc_approval,
+        )
+
+    def build_auto_borrow_transactions(
+        self,
+        user_address: str,
+        collateral_address: str,
+        borrow_amount: int,
+        loan_token: str,
+        oracle: str,
+        irm: str,
+        lltv: int,
+        needs_usdc_approval: bool,
+    ) -> list[TransactionCall]:
+        """Build transactions for auto-borrow: borrow more USDC, deposit to vault."""
+        user = chain_util.normalize_address(user_address)
+        collateral = chain_util.normalize_address(collateral_address)
+        transactions: list[TransactionCall] = []
+        borrow_calldata = encode_borrow(
+            loan_token=loan_token,
+            collateral_token=collateral,
+            oracle=oracle,
+            irm=irm,
+            lltv=lltv,
+            assets=borrow_amount,
+            on_behalf=user,
+            receiver=user,
+        )
+        transactions.append(TransactionCall(to=self.morphoAddress, data=borrow_calldata))
+        logging.info(f'Added borrow tx: {borrow_amount} USDC from Morpho')
+        if needs_usdc_approval:
+            usdc_approve_calldata = encode_approve(self.yoVaultAddress, borrow_amount)
+            transactions.append(TransactionCall(to=self.usdcAddress, data=usdc_approve_calldata))
+            logging.info(f'Added USDC approval tx: USDC -> Yo vault for {borrow_amount}')
+        deposit_calldata = encode_vault_deposit(borrow_amount, user)
+        transactions.append(TransactionCall(to=self.yoVaultAddress, data=deposit_calldata))
+        logging.info(f'Added vault deposit tx: {borrow_amount} USDC to Yo vault')
         return transactions

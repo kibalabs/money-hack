@@ -39,12 +39,12 @@ export class MoneyHackClient extends ServiceClient {
     return response.userConfig;
   };
 
-  public createPosition = async (userAddress: string, collateralAssetAddress: string, collateralAmount: bigint, targetLtv: number, authToken: string): Promise<Resources.Position> => {
+  public createPosition = async (userAddress: string, collateralAssetAddress: string, collateralAmount: bigint, targetLtv: number, agentName: string, agentEmoji: string, authToken: string): Promise<Resources.CreatePositionResult> => {
     const method = RestMethod.POST;
     const path = `v1/users/${userAddress}/positions`;
-    const request = new Endpoints.CreatePositionRequest(collateralAssetAddress, collateralAmount.toString(), targetLtv);
+    const request = new Endpoints.CreatePositionRequest(collateralAssetAddress, collateralAmount.toString(), targetLtv, agentName, agentEmoji);
     const response = await this.makeRequest(method, path, request, Endpoints.CreatePositionResponse, this.getHeaders(authToken));
-    return response.position;
+    return new Resources.CreatePositionResult(response.position, response.agent);
   };
 
   public getPosition = async (userAddress: string, authToken: string): Promise<Resources.Position | null> => {
@@ -55,20 +55,20 @@ export class MoneyHackClient extends ServiceClient {
     return response.position;
   };
 
-  public withdrawUsdc = async (userAddress: string, amount: bigint, authToken: string): Promise<{ position: Resources.Position; transactionHash: string }> => {
+  public getWithdrawTransactions = async (userAddress: string, amount: bigint, authToken: string): Promise<Endpoints.WithdrawResponse> => {
     const method = RestMethod.POST;
     const path = `v1/users/${userAddress}/position/withdraw`;
     const request = new Endpoints.WithdrawRequest(amount.toString());
     const response = await this.makeRequest(method, path, request, Endpoints.WithdrawResponse, this.getHeaders(authToken));
-    return { position: response.position, transactionHash: response.transactionHash };
+    return response;
   };
 
-  public closePosition = async (userAddress: string, authToken: string): Promise<string> => {
+  public getClosePositionTransactions = async (userAddress: string, authToken: string): Promise<Endpoints.ClosePositionResponse> => {
     const method = RestMethod.POST;
     const path = `v1/users/${userAddress}/position/close`;
     const request = new Endpoints.ClosePositionRequest();
     const response = await this.makeRequest(method, path, request, Endpoints.ClosePositionResponse, this.getHeaders(authToken));
-    return response.transactionHash;
+    return response;
   };
 
   public getMarketData = async (): Promise<Resources.MarketData> => {
@@ -95,19 +95,19 @@ export class MoneyHackClient extends ServiceClient {
     return response.positionTransactions;
   };
 
-  public getTelegramLoginUrl = async (userAddress: string, authToken: string): Promise<string> => {
+  public getTelegramBotUsername = async (userAddress: string, authToken: string): Promise<string> => {
     const method = RestMethod.GET;
     const path = `v1/users/${userAddress}/telegram/login-url`;
     const request = new Endpoints.TelegramLoginUrlRequest();
     const response = await this.makeRequest(method, path, request, Endpoints.TelegramLoginUrlResponse, this.getHeaders(authToken));
-    return response.loginUrl;
+    return response.botUsername;
   };
 
-  public verifyTelegramCode = async (userAddress: string, secretCode: string, authData: Record<string, string | null>, authToken: string): Promise<Resources.UserConfig> => {
+  public telegramSecretVerify = async (userAddress: string, telegramSecret: string, authToken: string): Promise<Resources.UserConfig> => {
     const method = RestMethod.POST;
-    const path = `v1/users/${userAddress}/telegram/verify-code`;
-    const request = new Endpoints.VerifyTelegramCodeRequest(secretCode, authData);
-    const response = await this.makeRequest(method, path, request, Endpoints.VerifyTelegramCodeResponse, this.getHeaders(authToken));
+    const path = `v1/users/${userAddress}/telegram/secret-verify`;
+    const request = new Endpoints.TelegramSecretVerifyRequest(telegramSecret);
+    const response = await this.makeRequest(method, path, request, Endpoints.TelegramSecretVerifyResponse, this.getHeaders(authToken));
     return response.userConfig;
   };
 

@@ -191,3 +191,39 @@ export class PositionTransactions {
     );
   };
 }
+
+export class Agent {
+  public constructor(
+    readonly agentId: string,
+    readonly name: string,
+    readonly emoji: string,
+    readonly agentIndex: number,
+    readonly ensName: string | null,
+    readonly createdDate: Date,
+  ) { }
+
+  public static fromObject = (obj: RawObject): Agent => {
+    return new Agent(
+      String(obj.agent_id),
+      String(obj.name),
+      String(obj.emoji),
+      Number(obj.agent_index),
+      obj.ens_name ? String(obj.ens_name) : null,
+      dateFromString(String(obj.created_date)),
+    );
+  };
+}
+
+export class CreatePositionResult {
+  public constructor(
+    readonly position: Position,
+    readonly agent: Agent,
+  ) { }
+
+  public static fromObject = (obj: RawObject): CreatePositionResult => {
+    return new CreatePositionResult(
+      Position.fromObject(obj.position as RawObject),
+      Agent.fromObject(obj.agent as RawObject),
+    );
+  };
+}

@@ -117,7 +117,89 @@
 
 ---
 
-### 🔲 Phase 5: Withdrawals & Position Management
+### ✅ Phase 4C: Database & Data Model (Complete)
+
+**Goal**: Migrate from file-based storage to PostgreSQL database to support proper user/agent management
+
+#### Database Tables
+- **tbl_users**: User accounts with Telegram linking
+- **tbl_user_wallets**: Wallet ↔ User relationship
+- **tbl_agents**: Autonomous lending agents (name, emoji, ENS subdomain)
+- **tbl_agent_positions**: Morpho lending positions per agent
+- **tbl_agent_actions**: Audit log of agent actions
+- **tbl_chat_events**: Chat/notification history
+
+#### Implementation
+- Alembic migrations (matches agent-hack pattern)
+- EntityRepository pattern for DB access
+- DatabaseStore replaces FileStore in AgentManager
+
+---
+
+### ✅ Phase 4D: Agent Creation Flow (Complete)
+
+**Goal**: Users create a named agent at the end of the setup flow
+
+**Updated Setup Wizard (4-5 steps):**
+
+1. **Step 1 - Collateral Selection**: Same as before (WETH, cbBTC)
+
+2. **Step 2 - LTV Selection**: Same as before (65-80%)
+
+3. **Step 3 - Deposit Amount**: Same as before (with preview)
+
+4. **Step 4 - Connect Telegram** *(conditional)*:
+   - Only shown if user doesn't already have Telegram linked
+   - If already connected, skip to step 5
+   - Uses existing OAuth flow
+
+5. **Step 5 - Name Your Agent**:
+   - Name input (e.g., "My Yield Bot", "WETH Farmer")
+   - Emoji picker (🤖 💰 🚀 📈 🏦 💎 ⚡ 🔥 🌟 🎯)
+   - Preview shows selected emoji + name
+   - Creates Agent record in database with the position
+
+**Backend Changes:**
+- Add `POST /v1/users/{userAddress}/agents` - Create new agent with name + emoji
+- Modify position creation to require agentId or create agent inline
+- Load user config at start to check Telegram connection status
+
+**Agent Dashboard Updates:**
+- Shows agent name + emoji in header
+- "My Agent: 🤖 WETH Farmer" style branding
+- Agent-centric URLs: `/agent/{agentId}` instead of `/position`
+
+---
+
+### ✅ Phase 4E: Telegram Webhook & Message Handling (Complete)
+
+**Goal**: Receive messages from Telegram users and route authentication data to the frontend
+
+#### Backend
+- **✅ POST /v1/telegram-webhook**: Telegram Bot API webhook endpoint
+  - Receives message updates from Telegram Bot API
+  - For unknown users: sends login link with secret code
+  - For known users: updates chat_id, sends welcome message
+  - Returns 200 OK to acknowledge receipt
+
+- **✅ POST /v1/users/{userAddress}/telegram/secret-verify**: Verify secret code
+  - Validates secret code from in-memory cache
+  - Links wallet address to Telegram chat_id
+  - Sends confirmation message to user
+
+- **✅ GET /v1/users/{userAddress}/telegram/login-url**: Returns bot username
+  - Returns @botUsername for frontend to open Telegram
+
+#### Frontend
+- **✅ Telegram Connection Flow**:
+  - User clicks "Connect Telegram" → opens Telegram bot
+  - User messages bot → bot sends link with telegramSecret
+  - User clicks link → returns to app with telegramSecret param
+  - Frontend calls telegramSecretVerify → linking complete
+
+---
+
+### ✅ Phase 5: Withdrawals & Position Management
 
 **Goal**: Allow users to withdraw USDC and close positions
 
@@ -131,9 +213,16 @@
 - **Morpho Repay**: Repay USDC debt
 - **Morpho Withdraw Collateral**: Return collateral to user
 
+**Implementation Notes**:
+- Added `encode_repay`, `encode_withdraw_collateral`, `encode_vault_withdraw` to transaction_builder.py
+- Added `build_withdraw_transactions`, `build_close_position_transactions_from_market` to TransactionBuilder
+- Implemented `get_withdraw_transactions` and `get_close_position_transactions` in AgentManager
+- Updated API endpoints to return transaction lists for user signing
+- Frontend updated to use new transaction-based withdrawal flow
+
 ---
 
-### 🔲 Phase 6: Autonomous LTV Management
+### ✅ Phase 6: Autonomous LTV Management
 
 **Goal**: Agent automatically maintains healthy positions
 
@@ -142,29 +231,68 @@
 - **Auto-Repay**: When LTV exceeds target, withdraw from vault and repay debt
 - **Auto-Borrow**: When LTV drops significantly below target (and profitable), borrow more and deposit to vault
 - **Profitability Gate**: Only take action if yield APY > borrow APR + estimated fees
+- **Action Logging**: All autonomous actions recorded in tbl_agent_actions for audit trail
+
+**Implementation Notes**:
+- Created `LtvManager` class in morpho/ltv_manager.py for LTV monitoring
+- Added `check_position_ltv` to detect when action is needed (5% margin thresholds)
+- Added `build_partial_repay_transactions` and `build_auto_borrow_transactions` to TransactionBuilder
+- Worker loop checks all active positions every 5 minutes
+- Actions logged to tbl_agent_actions with ltv_check action type
+- Added `get_all_active_positions` to DatabaseStore
 
 ---
 
-### 🔲 Phase 7: Telegram Notifications
+### ✅ Phase 7: Telegram Notifications
 
 **Goal**: Keep users informed of position changes
 
 #### Backend
 - **Notification Service**: Send messages via Telegram Bot API to linked chat_id
 - **Notification Types**:
-  - Position opened confirmation
+  - Position opened confirmation (with agent name + emoji)
   - LTV adjustment alerts (auto-repay/auto-borrow)
   - Critical warnings (LTV approaching liquidation)
   - Position closed confirmation
-  - Yield updates and earnings summaries
+  - Daily/weekly yield summaries
 
 #### Integration
 - Notifications triggered from background worker (Phase 6)
 - Graceful degradation if user hasn't connected Telegram
+- Messages stored in tbl_agent_actions for history
+
+**Implementation Notes**:
+- Created `NotificationService` class in notification_service.py
+- Added notification methods to TelegramClient for different notification types
+- Worker sends critical LTV warnings when position LTV reaches 80% of max LTV
+- Notifications logged to tbl_agent_actions for audit trail
+- Added `get_user` and `get_agent` methods to DatabaseStore
 
 ---
 
-### 🔲 Phase 8: Agent Wallet & Security (Stretch)
+### ✅ Phase 8: ENS Integration (Hackathon Prize Category)
+
+**Goal**: Creative use of ENS for agent identity and configuration
+
+See [ens-integration.md](ens-integration.md) for detailed spec.
+
+**Summary:**
+- Agents get ENS subdomains under `borrowbot.eth` (e.g., `mybot.borrowbot.eth`)
+- Agent config stored as ENS text records (LTV preferences, notification settings)
+- On-chain readable by any protocol - composable DeFi identity
+- Resolves to agent's smart wallet address
+
+**Implementation Notes**:
+- Created `EnsClient` class in external/ens_client.py
+- Added `EnsAgentConfig` model for agent configuration text records
+- Added ENS name validation and availability checking
+- Added methods to build subdomain registration and text record transactions
+- API endpoints: `/v1/ens/check-name`, `/v1/users/{addr}/ens/config-transactions`
+- Agent creation can now reserve ENS names and store them in database
+
+---
+
+### 🔲 Phase 9: Agent Wallet & Security (Stretch)
 
 **Goal**: Use ERC-4337 agent wallets for secure autonomous execution
 
@@ -175,16 +303,73 @@
 
 ---
 
+## Implementation Priority (Hackathon Focus)
+
+**Must Have (Demo-Ready):**
+1. ✅ Phase 1-4B: Foundation complete
+2. 🔲 Phase 4C: Database schema (users, agents, positions)
+3. 🔲 Phase 4D: Agent creation flow (name + emoji)
+4. 🔲 Phase 4E: Telegram webhook (complete OAuth flow)
+5. 🔲 Phase 8: ENS integration (hackathon prize category)
+
+**Nice to Have:**
+- Phase 5: Withdrawals
+- Phase 7: Telegram notifications
+
+**Stretch:**
+- Phase 6: Autonomous management
+- Phase 9: ERC-4337 agent wallets
+
+---
+
+## Data Model Summary (matching agent-hack pattern)
+
+```
+┌─────────────────┐      ┌─────────────────┐
+│    tbl_users    │      │  tbl_user_wallets│
+│                 │      │                  │
+│  id (UUID PK)   │◄────►│  user_id (FK)    │
+│  username       │      │  wallet_address  │
+│  telegram_id    │      └──────────────────┘
+│  telegram_chat_id│
+└────────┬────────┘
+         │
+         │ 1:N
+         ▼
+┌─────────────────┐      ┌─────────────────────┐
+│   tbl_agents    │      │  tbl_agent_positions │
+│                 │      │                      │
+│  id (UUID PK)   │◄────►│  agent_id (FK)       │
+│  user_id (FK)   │      │  collateral_asset    │
+│  name           │      │  borrow_amount       │
+│  emoji          │      │  target_ltv          │
+│  ens_name       │      │  vault_shares        │
+└────────┬────────┘      └──────────────────────┘
+         │
+         │ 1:N
+         ▼
+┌─────────────────┐      ┌─────────────────┐
+│ tbl_agent_actions│     │  tbl_chat_events │
+│                 │      │                  │
+│  agent_id (FK)  │      │  user_id (FK)    │
+│  action_type    │      │  agent_id (FK)   │
+│  value          │      │  event_type      │
+│  details (JSON) │      │  content (JSON)  │
+└─────────────────┘      └──────────────────┘
+```
+
+---
+
 ## Implementation Complete ✓
 
 **Phase 4**: Full on-chain position creation with sequential transaction signing
 **Phase 4B**: Complete Telegram OAuth integration with SetupPage flow
 
 ### What's Next?
-- **Phase 5**: Position management (withdrawals, closing)
-- **Phase 6**: Autonomous LTV monitoring and adjustments via background worker
-- **Phase 7**: Telegram message notifications via Bot API
-- **Phase 8**: ERC-4337 agent wallet for decentralized autonomous execution
+1. **Phase 4C**: Database schema migration (PostgreSQL)
+2. **Phase 4D**: Agent creation flow (name, emoji, ENS subdomain)
+3. **Phase 4E**: Telegram webhook for complete OAuth flow
+4. **Phase 8**: ENS integration for hackathon prize
 
 ---
 

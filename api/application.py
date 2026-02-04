@@ -2,6 +2,7 @@ import os
 
 from core import logging
 from core.api.default_routes import create_default_routes
+from core.api.middleware.database_connection_middleware import DatabaseConnectionMiddleware
 from core.api.middleware.exception_handling_middleware import ExceptionHandlingMiddleware
 from core.api.middleware.logging_middleware import LoggingMiddleware
 from core.api.middleware.server_headers_middleware import ServerHeadersMiddleware
@@ -29,11 +30,12 @@ agentManager = create_agent_manager()
 
 
 async def startup() -> None:
-    pass
+    await agentManager.databaseStore.database.connect(poolSize=2 if isRunningDebugMode else 25)
 
 
 async def shutdown() -> None:
     await agentManager.requester.close_connections()
+    await agentManager.databaseStore.database.disconnect()
 
 
 app = Starlette(
@@ -47,6 +49,7 @@ app = Starlette(
 app.add_middleware(ExceptionHandlingMiddleware)
 app.add_middleware(ServerHeadersMiddleware, name=name, version=version, environment=environment)
 app.add_middleware(LoggingMiddleware, requestIdHolder=requestIdHolder)
+app.add_middleware(DatabaseConnectionMiddleware, database=agentManager.databaseStore.database)
 app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=9)
 app.add_middleware(
     CORSMiddleware,

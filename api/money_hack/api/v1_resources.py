@@ -78,3 +78,27 @@ class PositionTransactionsData(BaseModel):
     vault_address: str
     estimated_borrow_amount: str
     needs_approval: bool
+
+
+class WithdrawTransactionsData(BaseModel):
+    transactions: list[TransactionCall]
+    withdraw_amount: str
+    vault_address: str
+
+
+class ClosePositionTransactionsData(BaseModel):
+    transactions: list[TransactionCall]
+    collateral_amount: str
+    repay_amount: str
+    vault_withdraw_amount: str
+    morpho_address: str
+    vault_address: str
+
+
+class Agent(BaseModel):
+    agent_id: str
+    name: str
+    emoji: str
+    agent_index: int
+    ens_name: str | None = None
+    created_date: datetime
