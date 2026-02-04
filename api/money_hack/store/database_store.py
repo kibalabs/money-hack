@@ -134,7 +134,7 @@ class DatabaseStore:
         )
 
     async def get_all_active_positions(self) -> list[AgentPosition]:
-        return await AgentPositionsRepository.get_all(
+        return await AgentPositionsRepository.list_many(
             database=self.database,
             fieldFilters=[
                 StringFieldFilter(fieldName='status', eq='active'),

@@ -19,27 +19,24 @@ export function AgentPage(): React.ReactElement {
   const [marketData, setMarketData] = React.useState<MarketData | null>(null);
   const [isLoading, setIsLoading] = React.useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = React.useState<boolean>(false);
+  const hasLoadedRef = React.useRef<boolean>(false);
 
   const loadData = React.useCallback(async (showLoading: boolean = true): Promise<void> => {
     if (!accountAddress || !authToken) return;
-
     if (showLoading) {
       setIsLoading(true);
     } else {
       setIsRefreshing(true);
     }
-
     try {
       const [fetchedPosition, fetchedMarketData] = await Promise.all([
         moneyHackClient.getPosition(accountAddress, authToken),
         moneyHackClient.getMarketData(),
       ]);
-
       if (!fetchedPosition) {
         navigator.navigateTo('/setup');
         return;
       }
-
       setPosition(fetchedPosition);
       setMarketData(fetchedMarketData);
     } catch (error) {
@@ -49,16 +46,19 @@ export function AgentPage(): React.ReactElement {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, [accountAddress, authToken, moneyHackClient, navigator, toastManager]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountAddress, authToken, moneyHackClient]);
 
   React.useEffect(() => {
     if (!isWeb3AccountLoggedIn) {
       navigator.navigateTo('/');
       return;
     }
-
+    if (hasLoadedRef.current) return;
+    hasLoadedRef.current = true;
     loadData();
-  }, [isWeb3AccountLoggedIn, loadData, navigator]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isWeb3AccountLoggedIn]);
 
   const handleRefreshClicked = React.useCallback((): void => {
     loadData(false);

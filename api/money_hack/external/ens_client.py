@@ -139,7 +139,7 @@ class EnsClient:
 
     def build_register_subdomain_transaction(self, label: str, ownerAddress: str) -> TransactionCall:
         """Build transaction to register a subdomain under borrowbot.eth."""
-        nameWrapperContract = w3.eth.contract(address=self.nameWrapperAddress, abi=ENS_NAME_WRAPPER_ABI)
+        nameWrapperContract = w3.eth.contract(address=Web3.to_checksum_address(self.nameWrapperAddress), abi=ENS_NAME_WRAPPER_ABI)
         fn = nameWrapperContract.functions.setSubnodeOwner(
             self.parentNode,
             label.lower(),
@@ -155,7 +155,7 @@ class EnsClient:
     def build_set_text_record_transaction(self, ensName: str, key: str, value: str) -> TransactionCall:
         """Build transaction to set a text record on an ENS name."""
         node = namehash(ensName)
-        resolverContract = w3.eth.contract(address=self.resolverAddress, abi=ENS_PUBLIC_RESOLVER_ABI)
+        resolverContract = w3.eth.contract(address=Web3.to_checksum_address(self.resolverAddress), abi=ENS_PUBLIC_RESOLVER_ABI)
         fn = resolverContract.functions.setText(node, key, value)
         encoded = fn.build_transaction({'from': '0x0000000000000000000000000000000000000000'})['data']
         calldata = str(encoded) if isinstance(encoded, (bytes, str)) else encoded

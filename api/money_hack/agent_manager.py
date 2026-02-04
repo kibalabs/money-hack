@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import typing
 import uuid
@@ -5,21 +6,22 @@ from datetime import UTC
 from datetime import datetime
 
 from core import logging
+from core.exceptions import BadRequestException
 from core.exceptions import KibaException
 from core.exceptions import NotFoundException
 from core.exceptions import UnauthorizedException
 from core.requester import Requester
 from core.util import chain_util
 from core.web3.eth_client import ABI
+from core.web3.eth_client import EncodedCall
 from core.web3.eth_client import RestEthClient
+from eth_account import Account
 from eth_account.messages import _hash_eip191_message
 from eth_account.messages import encode_defunct
 from hexbytes import HexBytes
 from siwe import SiweMessage  # type: ignore[import-untyped]
 from web3 import Web3
-from web3.types import Nonce
 from web3.types import TxParams
-from web3.types import Wei
 
 from money_hack import constants
 from money_hack.api.authorizer import Authorizer
@@ -45,6 +47,8 @@ from money_hack.forty_acres.forty_acres_client import FortyAcresClient
 from money_hack.morpho.morpho_client import MorphoClient
 from money_hack.morpho.transaction_builder import TransactionBuilder
 from money_hack.smart_wallets.coinbase_bundler import CoinbaseBundler
+from money_hack.smart_wallets.coinbase_constants import COINBASE_EIP7702PROXY_ADDRESS
+from money_hack.smart_wallets.coinbase_constants import COINBASE_SMART_WALLET_IMPLEMENTATION_ADDRESS
 from money_hack.smart_wallets.coinbase_smart_wallet import CoinbaseSmartWallet
 from money_hack.store.database_store import DatabaseStore
 
@@ -83,9 +87,10 @@ class AgentManager(Authorizer):
         telegramClient: TelegramClient,
         ensClient: EnsClient,
         databaseStore: DatabaseStore,
-        coinbaseCdpClient: CoinbaseCdpClient | None = None,
-        coinbaseSmartWallet: CoinbaseSmartWallet | None = None,
-        coinbaseBundler: CoinbaseBundler | None = None,
+        coinbaseCdpClient: CoinbaseCdpClient,
+        coinbaseSmartWallet: CoinbaseSmartWallet,
+        coinbaseBundler: CoinbaseBundler,
+        deployerPrivateKey: str,
     ) -> None:
         self.chainId = chainId
         self.requester = requester
@@ -100,6 +105,9 @@ class AgentManager(Authorizer):
         self.coinbaseCdpClient = coinbaseCdpClient
         self.coinbaseSmartWallet = coinbaseSmartWallet
         self.coinbaseBundler = coinbaseBundler
+        self.deployerPrivateKey = deployerPrivateKey
+        self.deployerAddress = Account.from_key(deployerPrivateKey).address if deployerPrivateKey else None
+        self.deployerTransactionLock = asyncio.Lock()
         self._signatureSignerMap: dict[str, str] = {}
         self._positionsCache: dict[str, Position] = {}
         self._userConfigsCache: dict[str, UserConfig] = {}
@@ -261,6 +269,7 @@ class AgentManager(Authorizer):
         )
         transactionHash = await self._execute_agent_deploy_transactions(
             agentWalletAddress=agent.walletAddress,
+            userAddress=normalizedAddress,
             collateralAssetAddress=collateral_asset_address,
             collateralAmount=collateral_amount,
             targetLtv=target_ltv,
@@ -287,47 +296,120 @@ class AgentManager(Authorizer):
         self._positionsCache[normalizedAddress] = position
         return position, transactionHash
 
-    async def _execute_agent_deploy_transactions(self, agentWalletAddress: str, collateralAssetAddress: str, collateralAmount: str, targetLtv: float) -> str | None:
+    async def _make_deployer_transaction(self, params: TxParams, maxRetryCount: int = 3) -> str:
+        if self.deployerPrivateKey is None or self.deployerAddress is None:
+            raise BadRequestException('Deployer private key is not configured')
+        async with self.deployerTransactionLock:
+            baseParams = await self.ethClient.fill_transaction_params(params=params, fromAddress=self.deployerAddress)
+            retryCount = 0
+            while True:
+                paramsToSend = dict(baseParams)
+                if retryCount > 0:
+                    multiplier = 1 + (retryCount * 0.15)
+                    paramsToSend['gas'] = int(baseParams['gas'] * multiplier)
+                    paramsToSend['maxFeePerGas'] = hex(int(int(baseParams['maxFeePerGas'], 16) * multiplier))  # type: ignore[arg-type]
+                    paramsToSend['maxPriorityFeePerGas'] = hex(int(int(baseParams['maxPriorityFeePerGas'], 16) * multiplier))  # type: ignore[arg-type]
+                signedParams = self.ethClient.w3.eth.account.sign_transaction(transaction_dict=paramsToSend, private_key=self.deployerPrivateKey)
+                transactionHash = await self.ethClient.send_raw_transaction(transactionData=signedParams.raw_transaction.hex())
+                logging.info(f'Sending deployer transaction (retry={retryCount}): {transactionHash}')
+                try:
+                    await self.ethClient.wait_for_transaction_receipt(transactionHash=transactionHash)
+                    logging.info(f'Deployer transaction confirmed: {transactionHash}')
+                    return transactionHash  # noqa: TRY300
+                except BadRequestException as exception:
+                    if not exception.message or 'replacement transaction underpriced' not in exception.message:
+                        raise
+                    if retryCount >= (maxRetryCount - 1):
+                        raise
+                    retryCount += 1
+
+    async def _sign_hash_with_cdp(self, messageHash: str, walletAddress: str) -> str:
         if self.coinbaseCdpClient is None:
+            raise BadRequestException('Coinbase CDP client is not configured')
+        return await self.coinbaseCdpClient.sign_hash(walletAddress=walletAddress, messageHash=messageHash)
+
+    async def _set_delegation(self, agentWalletAddress: str, userAddress: str) -> None:
+        if self.coinbaseSmartWallet is None or self.deployerPrivateKey is None:
+            raise BadRequestException('Smart wallet or deployer is not configured')
+        currentDelegationStatus = await self.coinbaseSmartWallet.get_eoa_delegation_status(address=agentWalletAddress)
+        if currentDelegationStatus.isDelegatedToCoinbaseSmartWallet:
+            return
+        upgradeData = hex(0)
+        if currentDelegationStatus.implementationAddress != COINBASE_SMART_WALLET_IMPLEMENTATION_ADDRESS:
+            initArgs = self.coinbaseSmartWallet.encode_initialize_call(owners=[agentWalletAddress, userAddress])
+            setImplementationHash = await self.coinbaseSmartWallet.create_set_implementation_hash(
+                address=agentWalletAddress,
+                callData=initArgs,
+                currentImplementationAddress=currentDelegationStatus.implementationAddress or chain_util.BURN_ADDRESS,
+            )
+            signedSetImplementationHash = await self._sign_hash_with_cdp(messageHash=setImplementationHash, walletAddress=agentWalletAddress)
+            upgradeData = self.coinbaseSmartWallet.encode_set_implementation_call(
+                initArgs=initArgs,
+                signedSetImplementationHash=signedSetImplementationHash,
+            )
+        unsignedAuthorization = await self.coinbaseSmartWallet.build_unsigned_authorization(
+            walletAddress=agentWalletAddress,
+            targetAddress=COINBASE_EIP7702PROXY_ADDRESS,
+            isUserMakingTransaction=False,
+        )
+        authHash = unsignedAuthorization.hash().hex()
+        authSignatureHex = await self._sign_hash_with_cdp(messageHash=authHash, walletAddress=agentWalletAddress)
+        signedAuth = self.coinbaseSmartWallet.build_signed_authorization(
+            unsignedAuthorization=unsignedAuthorization,
+            authSignatureHex=authSignatureHex,
+        )
+        params = await self.coinbaseSmartWallet.build_delegation_transaction_params(
+            walletAddress=agentWalletAddress,
+            signedAuthorization=signedAuth,
+            data=upgradeData,
+        )
+        await self._make_deployer_transaction(params=params)
+        logging.info(f'Delegation set for {agentWalletAddress}')
+
+    async def _send_user_operation(self, agentWalletAddress: str, calls: list[EncodedCall]) -> str:
+        if self.coinbaseSmartWallet is None or self.coinbaseBundler is None or self.coinbaseCdpClient is None:
+            raise BadRequestException('Smart wallet infrastructure is not configured')
+        self.coinbaseBundler.validate_calls(calls=calls, chainId=self.chainId)
+        await self.coinbaseSmartWallet.validate_calls(calls=calls, chainId=self.chainId)
+        callData = await self.coinbaseSmartWallet.build_execute_call_data(chainId=self.chainId, calls=calls)
+        userOperation = await self.coinbaseBundler.build_user_operation(
+            chainId=self.chainId,
+            sender=agentWalletAddress,
+            callData=callData,
+            shouldSponsorGas=True,
+        )
+        userOpHashToSign = await self.coinbaseBundler.generate_user_operation_hash(userOperation=userOperation)
+        signature = await self._sign_hash_with_cdp(messageHash=userOpHashToSign, walletAddress=agentWalletAddress)
+        userOperationSignature = self.coinbaseSmartWallet.encode_user_operation_signature(signature=signature)
+        userOperationHash = await self.coinbaseBundler.send_user_operation(userOperation=userOperation, signature=userOperationSignature)
+        logging.info(f'Sent user operation: {userOperationHash}')
+        receipt = await self.coinbaseBundler.wait_for_user_operation_receipt(userOperationHash=userOperationHash, raiseOnFailure=True)
+        transactionHash = typing.cast(str, receipt['receipt']['transactionHash'])
+        logging.info(f'User operation confirmed: {transactionHash}')
+        return transactionHash
+
+    async def _execute_agent_deploy_transactions(self, agentWalletAddress: str, userAddress: str, collateralAssetAddress: str, collateralAmount: str, targetLtv: float) -> str | None:
+        if self.coinbaseCdpClient is None or self.coinbaseSmartWallet is None or self.coinbaseBundler is None or self.deployerPrivateKey is None:
             return None
+        await self._set_delegation(agentWalletAddress=agentWalletAddress, userAddress=userAddress)
         transactionsData = await self._build_position_transactions(
             userAddress=agentWalletAddress,
             collateralAssetAddress=collateralAssetAddress,
             collateralAmount=collateralAmount,
             targetLtv=targetLtv,
         )
-        lastTxHash = None
-        for tx in transactionsData.transactions:
-            nonce = await self.ethClient.get_transaction_count(address=agentWalletAddress)
-            maxPriorityFeePerGas = await self.ethClient.get_max_priority_fee_per_gas()
-            maxFeePerGas = await self.ethClient.get_max_fee_per_gas(maxPriorityFeePerGas=maxPriorityFeePerGas)
-            txParams = await self.ethClient.fill_transaction_params(
-                params={'to': tx.to, 'data': HexBytes(tx.data), 'value': Wei(int(tx.value or '0'))},
-                fromAddress=agentWalletAddress,
-                nonce=nonce,
-                maxFeePerGas=int(maxFeePerGas * 1.5),
-                maxPriorityFeePerGas=int(maxPriorityFeePerGas * 1.2),
-                chainId=self.chainId,
+        calls = [
+            EncodedCall(
+                toAddress=tx.to,
+                data=tx.data if tx.data.startswith('0x') else f'0x{tx.data}',
+                value=int(tx.value or '0'),
             )
-
-            def parse_hex_int(value: object) -> int:
-                strValue = str(value)
-                return int(strValue, 16) if strValue.startswith('0x') else int(strValue)
-
-            txParamsForSigning: TxParams = {
-                'chainId': parse_hex_int(txParams['chainId']),
-                'nonce': Nonce(parse_hex_int(txParams['nonce'])),
-                'to': Web3.to_checksum_address(typing.cast(str, txParams['to'])),
-                'data': HexBytes(txParams['data']),
-                'value': Wei(parse_hex_int(txParams['value'])),
-                'gas': int(parse_hex_int(txParams['gas']) * 1.2),
-                'maxFeePerGas': Wei(parse_hex_int(txParams['maxFeePerGas'])),
-                'maxPriorityFeePerGas': Wei(parse_hex_int(txParams['maxPriorityFeePerGas'])),
-            }
-            signedTx = await self.coinbaseCdpClient.sign_transaction(walletAddress=agentWalletAddress, transactionDict=txParamsForSigning)
-            lastTxHash = await self.ethClient.send_raw_transaction(transactionData=signedTx)
-            logging.info(f'Agent executed transaction: {lastTxHash}')
-        return lastTxHash
+            for tx in transactionsData.transactions
+        ]
+        if not calls:
+            return None
+        transactionHash = await self._send_user_operation(agentWalletAddress=agentWalletAddress, calls=calls)
+        return transactionHash
 
     async def _build_position_transactions(self, userAddress: str, collateralAssetAddress: str, collateralAmount: str, targetLtv: float) -> PositionTransactionsData:
         return await self.get_position_transactions(user_address=userAddress, collateral_asset_address=collateralAssetAddress, collateral_amount=collateralAmount, target_ltv=targetLtv)

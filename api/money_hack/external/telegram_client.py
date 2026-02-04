@@ -54,7 +54,7 @@ class TelegramClient:
         self.botUsername: str = ''
         self.secretCodeChatIdUsernameCache: dict[str, tuple[str, str]] = {}
 
-    async def send_message(self, chatId: int | str, text: str) -> None:
+    async def send_message(self, chatId: int | str, text: str) -> bool:
         url = f'{self.botApiUrl}/sendMessage'
         logging.info(f'[TELEGRAM] Original text: {text}')
         text = telegramify_markdown.markdownify(text)
@@ -69,6 +69,7 @@ class TelegramClient:
         logging.info(f'[TELEGRAM] Response: {responseDict}')
         if not responseDict.get('ok'):
             raise BadRequestException(f'Failed to send message: {responseDict}')
+        return True
 
     async def send_message_html(self, chatId: int | str, text: str) -> None:
         url = f'{self.botApiUrl}/sendMessage'
@@ -92,7 +93,7 @@ class TelegramClient:
             raise BadRequestException(f'Failed to get bot info: {e}')
         if not responseData.ok:
             raise BadRequestException(f'Failed to get bot info: {responseData.description}')
-        if responseData.result is None:
+        if responseData.result is None or isinstance(responseData.result, bool):
             raise BadRequestException('No bot info in response')
         botUsername = str(responseData.result.get('username', ''))
         if not botUsername:

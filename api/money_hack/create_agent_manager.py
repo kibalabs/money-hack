@@ -26,6 +26,7 @@ BASE_PAYMASTER_RPC_URL = os.environ['BASE_PAYMASTER_RPC_URL']
 CDP_WALLET_SECRET = os.environ['CDP_WALLET_SECRET']
 CDP_API_KEY_NAME = os.environ['CDP_API_KEY_NAME']
 CDP_API_KEY_PRIVATE_KEY = os.environ['CDP_API_KEY_PRIVATE_KEY']
+DEPLOYER_PRIVATE_KEY = os.environ['DEPLOYER_PRIVATE_KEY']
 MORALIS_API_KEY = os.environ['MORALIS_API_KEY']
 ALCHEMY_API_KEY = os.environ['ALCHEMY_API_KEY']
 BLOCKSCOUT_API_KEY = os.environ['BLOCKSCOUT_API_KEY']
@@ -88,5 +89,6 @@ def create_agent_manager() -> AgentManager:
         coinbaseCdpClient=coinbaseCdpClient,
         coinbaseSmartWallet=coinbaseSmartWallet,
         coinbaseBundler=coinbaseBundler,
+        deployerPrivateKey=DEPLOYER_PRIVATE_KEY,
     )
     return agentManager

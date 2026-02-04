@@ -46,19 +46,30 @@ export function DeployAgentPage(): React.ReactElement {
   const [transactionHash, setTransactionHash] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const hasStartedRef = React.useRef<boolean>(false);
+  const hasErrorRef = React.useRef<boolean>(false);
   React.useEffect((): void => {
     if (!accountAddress || !collateralAddress || amountStr === '0' || !agentId) {
       navigator.navigateTo('/create-agent');
     }
   }, [accountAddress, collateralAddress, amountStr, agentId, navigator]);
+  const formatErrorMessage = (errorMessage: string): string => {
+    if (errorMessage.includes('insufficient funds for gas')) {
+      return 'Your agent wallet needs ETH for gas fees. Please send a small amount of ETH to the agent wallet address and try again.';
+    }
+    if (errorMessage.includes('execution reverted')) {
+      return `Transaction failed: ${errorMessage.split('execution reverted:')[1]?.trim() || errorMessage}`;
+    }
+    return errorMessage;
+  };
   const runDeployment = React.useCallback(async (): Promise<void> => {
-    if (!accountAddress || !authToken || isDeploying || hasStartedRef.current || !agentId) return;
+    if (!accountAddress || !authToken || isDeploying || hasStartedRef.current || !agentId || hasErrorRef.current) return;
     hasStartedRef.current = true;
     setIsDeploying(true);
     setError(null);
+    let stepInterval: ReturnType<typeof setInterval> | null = null;
     try {
       setCurrentStepIndex(0);
-      const stepInterval = setInterval(() => {
+      stepInterval = setInterval(() => {
         setCurrentStepIndex((prev) => {
           if (prev < DEPLOY_STEPS.length - 1) {
             return prev + 1;
@@ -81,20 +92,23 @@ export function DeployAgentPage(): React.ReactElement {
       }
       setIsDeployed(true);
     } catch (caughtError) {
+      if (stepInterval) clearInterval(stepInterval);
       console.error('Deployment failed:', caughtError);
-      setError(caughtError instanceof Error ? caughtError.message : 'Deployment failed. Please try again.');
-      hasStartedRef.current = false;
+      const errorMessage = caughtError instanceof Error ? caughtError.message : 'Deployment failed. Please try again.';
+      setError(formatErrorMessage(errorMessage));
+      hasErrorRef.current = true;
     } finally {
       setIsDeploying(false);
     }
   }, [accountAddress, authToken, isDeploying, agentId, moneyHackClient, collateralAddress, amountStr, ltvStr]);
   React.useEffect((): void => {
-    if (accountAddress && authToken && !hasStartedRef.current && agentId) {
+    if (accountAddress && authToken && !hasStartedRef.current && agentId && !hasErrorRef.current) {
       runDeployment();
     }
   }, [accountAddress, authToken, agentId, runDeployment]);
   const onRetryClicked = (): void => {
     hasStartedRef.current = false;
+    hasErrorRef.current = false;
     setError(null);
     setCurrentStepIndex(0);
     runDeployment();
