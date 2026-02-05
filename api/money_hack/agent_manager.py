@@ -415,7 +415,10 @@ class AgentManager(Authorizer):  # Core manager
         logging.info(f'Checking LTV for {len(positions)} active positions')
         for position in positions:
             try:
-                result = await self.ltvManager.check_position_ltv(position)
+                # Look up collateral asset to get correct decimals
+                collateral = next((c for c in SUPPORTED_COLLATERALS if c.address.lower() == position.collateralAsset.lower()), None)
+                collateralDecimals = collateral.decimals if collateral else 18
+                result = await self.ltvManager.check_position_ltv(position=position, collateralDecimals=collateralDecimals)
                 await self.ltvManager.log_ltv_check(result)
                 agent = await self.databaseStore.get_agent(agentId=position.agentId)
                 if not agent:

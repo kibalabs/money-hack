@@ -204,7 +204,7 @@ export function PositionDashboard(props: IPositionDashboardProps): React.ReactEl
       </Box>
 
       {/* Actions */}
-      <Spacing variant={PaddingSize.Default} />
+      <Spacing variant={PaddingSize.Wide} />
       <Stack direction={Direction.Horizontal} shouldAddGutters={true} isFullWidth={true}>
         <Stack.Item growthFactor={1} shrinkFactor={1}>
           <Button

@@ -111,21 +111,6 @@ export function AgentTerminal(props: AgentTerminalProps): React.ReactElement {
     }
   }, [displayedActions]);
 
-  const now = new Date();
-  const lastActionTime = displayedActions.length > 0
-    ? displayedActions[displayedActions.length - 1].createdDate
-    : null;
-
-  const timeSinceLastAction = lastActionTime
-    ? Math.floor((now.getTime() - lastActionTime.getTime()) / 1000)
-    : null;
-
-  // Show waiting state if last action was more than 60 seconds ago
-  const isWaiting = timeSinceLastAction !== null && timeSinceLastAction > 60;
-  const nextCheckIn = timeSinceLastAction !== null
-    ? Math.max(0, 300 - timeSinceLastAction) // 5 minutes = 300 seconds
-    : 0;
-
   const formatActionContent = (action: AgentAction): string => {
     // Construct message from details object
     if (action.details.message) {
@@ -143,43 +128,10 @@ export function AgentTerminal(props: AgentTerminalProps): React.ReactElement {
 
   return (
     <Box className='agent-terminal-container'>
-      <Box className='agent-terminal-header' style={{ padding: '12px 16px' }}>
-        <Stack direction={Direction.Horizontal} shouldAddGutters={true} childAlignment={Alignment.Center}>
-          {props.agent && (
-            <Text variant='bold'>
-              {props.agent.emoji}
-              {' '}
-              {props.agent.name}
-            </Text>
-          )}
-          {!props.agent && (
-            <React.Fragment>
-              <KibaIcon iconId='ion-terminal' />
-              <Text variant='bold'>Agent Thought Stream</Text>
-            </React.Fragment>
-          )}
-        </Stack>
-        <Text variant='note-small'>
-          {props.isLoading ? 'Loading...' : `${props.actions.length} thoughts`}
-        </Text>
-      </Box>
-
       <Box style={{ padding: '16px' }}>
         {!props.agent && (
           <div className='agent-terminal-line'>
             <Text>No agent active</Text>
-          </div>
-        )}
-
-        {props.agent && displayedActions.length === 0 && !props.isLoading && (
-          <div className='agent-terminal-line'>
-            <Text>
-              {props.agent.name}
-              {' '}
-              is
-              {' '}
-              {animatedActivity}
-            </Text>
           </div>
         )}
 
@@ -195,24 +147,19 @@ export function AgentTerminal(props: AgentTerminalProps): React.ReactElement {
           </div>
         ))}
 
-        {isWaiting && props.actions.length > 0 && (
-          <div className='agent-terminal-line is-waiting'>
-            <span className='agent-terminal-timestamp'>{dateToString(now, 'HH:mm:ss')}</span>
-            <span className='agent-terminal-action-type waiting'>[WAITING]</span>
+        {props.agent && newActionIds.size === 0 && !props.isLoading && (
+          <div className='agent-terminal-line'>
             <span>
-              Next monitoring cycle in
+              {props.agent.name}
               {' '}
-              {Math.floor(nextCheckIn / 60)}
-              m
+              is
               {' '}
-              {nextCheckIn % 60}
-              s
-              <span className='agent-terminal-waiting-dots' />
+              {animatedActivity}
             </span>
           </div>
         )}
 
-        {/* {!props.isLoading && (
+        {/* {newActionIds.size === 0 && !props.isLoading && (
           <div className='agent-terminal-line'>
             <span className='agent-terminal-cursor' />
           </div>

@@ -1,7 +1,7 @@
 import React from 'react';
 
 import { useLocalStorageState, useNavigator } from '@kibalabs/core-react';
-import { Alignment, Box, Button, Direction, PaddingSize, Stack, Text } from '@kibalabs/ui-react';
+import { Alignment, Box, Button, Direction, PaddingSize, Spacing, Stack, Text } from '@kibalabs/ui-react';
 import { useToastManager } from '@kibalabs/ui-react-toast';
 
 import { useAuth } from '../AuthContext';
@@ -192,6 +192,7 @@ export function AgentPage(): React.ReactElement {
         />
       </Box>
 
+      <Spacing variant={PaddingSize.Wide2} />
       <Box maxWidth='600px' isFullWidth={true}>
         <Stack direction={Direction.Vertical} shouldAddGutters={true} childAlignment={Alignment.Center}>
           <Text variant='note'>
