@@ -7,6 +7,7 @@ from core.requester import Requester
 from core.store.database import Database
 from core.web3.eth_client import RestEthClient
 
+from money_hack import constants
 from money_hack.agent.chat_bot import ChatBot
 from money_hack.agent.chat_history_store import ChatHistoryStore
 from money_hack.agent.chat_tool import ChatTool
@@ -24,7 +25,9 @@ from money_hack.external.coinbase_cdp_client import CoinbaseCdpClient
 from money_hack.external.ens_client import EnsClient
 from money_hack.external.telegram_client import TelegramClient
 from money_hack.forty_acres.forty_acres_client import FortyAcresClient
+from money_hack.morpho.ltv_manager import LtvManager
 from money_hack.morpho.morpho_client import MorphoClient
+from money_hack.notification_service import NotificationService
 from money_hack.smart_wallets.coinbase_bundler import CoinbaseBundler
 from money_hack.smart_wallets.coinbase_smart_wallet import CoinbaseSmartWallet
 from money_hack.store.database_store import DatabaseStore
@@ -94,6 +97,26 @@ def create_agent_manager() -> AgentManager:
         SetTargetLtvTool(),
     ]
     chatBot = ChatBot(llm=geminiLlm, historyStore=chatHistoryStore, tools=chatTools) if geminiLlm else None
+
+    # LTV Monitoring Setup
+    usdcAddress = constants.CHAIN_USDC_MAP.get(BASE_CHAIN_ID)
+    yoVaultAddress = '0x0000000f2eB9f69274678c76222B35eEc7588a65'
+    ltvManager = None
+    notificationService = None
+    if usdcAddress:
+        ltvManager = LtvManager(
+            chainId=BASE_CHAIN_ID,
+            usdcAddress=usdcAddress,
+            yoVaultAddress=yoVaultAddress,
+            morphoClient=morphoClient,
+            alchemyClient=alchemyClient,
+            databaseStore=databaseStore,
+        )
+        notificationService = NotificationService(
+            telegramClient=telegramClient,
+            databaseStore=databaseStore,
+        )
+
     agentManager = AgentManager(
         requester=requester,
         chainId=BASE_CHAIN_ID,
@@ -111,5 +134,7 @@ def create_agent_manager() -> AgentManager:
         deployerPrivateKey=DEPLOYER_PRIVATE_KEY,
         chatBot=chatBot,
         chatHistoryStore=chatHistoryStore,
+        ltvManager=ltvManager,
+        notificationService=notificationService,
     )
     return agentManager
