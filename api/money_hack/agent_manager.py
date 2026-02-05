@@ -82,7 +82,7 @@ YO_VAULT_ADDRESS = '0x0000000f2eB9f69274678c76222B35eEc7588a65'
 YO_VAULT_NAME = 'Yo USDC Vault'
 
 
-class AgentManager(Authorizer):
+class AgentManager(Authorizer):  # Core manager
     def __init__(
         self,
         requester: Requester,
@@ -411,8 +411,8 @@ class AgentManager(Authorizer):
 
         LTV_CHECK_INTERVAL_SECONDS = 300
         CRITICAL_LTV_THRESHOLD = 0.80
-        WARN_INTERVAL_HOURS = 4
-        URGENT_INTERVAL_HOURS = 1
+        # WARN_INTERVAL_HOURS = 4  # Disabled for testing
+        # URGENT_INTERVAL_HOURS = 1  # Disabled for testing
 
         while True:
             try:
@@ -460,13 +460,14 @@ class AgentManager(Authorizer):
                         maxLtv = result.max_ltv
                         isCritical = currentLtv >= CRITICAL_LTV_THRESHOLD * maxLtv and maxLtv > 0
                         if (result.needs_action and result.action_type == 'manual_repay') or isCritical:
-                            lastWarning = await self.databaseStore.get_latest_action_by_type(agent.agentId, 'critical_ltv_warning')
+                            # Temporarily disabled throttling - send all messages for testing/agent thoughts
+                            # lastWarning = await self.databaseStore.get_latest_action_by_type(agent.agentId, 'critical_ltv_warning')
                             shouldWarn = True
-                            if lastWarning:
-                                timeSince = datetime.now(tz=UTC) - lastWarning.createdDate.replace(tzinfo=UTC)
-                                interval = URGENT_INTERVAL_HOURS if isCritical else WARN_INTERVAL_HOURS
-                                if timeSince.total_seconds() < interval * 3600:
-                                    shouldWarn = False
+                            # if lastWarning:
+                            #     timeSince = datetime.now(tz=UTC) - lastWarning.createdDate.replace(tzinfo=UTC)
+                            #     interval = URGENT_INTERVAL_HOURS if isCritical else WARN_INTERVAL_HOURS
+                            #     if timeSince.total_seconds() < interval * 3600:
+                            #         shouldWarn = False
 
                             if shouldWarn:
                                 await self.notificationService.send_critical_ltv_warning(
@@ -479,14 +480,15 @@ class AgentManager(Authorizer):
                             logging.warning(f'Position {position.agentPositionId} needs action: {result.action_type} - {result.reason}')
 
                         # Daily Digest
-                        lastDigest = await self.databaseStore.get_latest_action_by_type(agent.agentId, 'daily_digest')
+                        # Temporarily disabled throttling - send all messages for testing/agent thoughts
+                        # lastDigest = await self.databaseStore.get_latest_action_by_type(agent.agentId, 'daily_digest')
                         shouldSendDigest = True
-                        if lastDigest:
-                            # Use aware datetime for comparison
-                            lastCreated = lastDigest.createdDate.replace(tzinfo=UTC) if lastDigest.createdDate.tzinfo is None else lastDigest.createdDate
-                            timeSince = datetime.now(tz=UTC) - lastCreated
-                            if timeSince.total_seconds() < 24 * 3600:
-                                shouldSendDigest = False
+                        # if lastDigest:
+                        #     # Use aware datetime for comparison
+                        #     lastCreated = lastDigest.createdDate.replace(tzinfo=UTC) if lastDigest.createdDate.tzinfo is None else lastDigest.createdDate
+                        #     timeSince = datetime.now(tz=UTC) - lastCreated
+                        #     if timeSince.total_seconds() < 24 * 3600:
+                        #         shouldSendDigest = False
 
                         if shouldSendDigest and not result.needs_action and not isCritical:
                             priceData = await self.alchemyClient.get_asset_current_price(chainId=self.chainId, assetAddress=position.collateralAsset)
