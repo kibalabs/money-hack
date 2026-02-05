@@ -1,6 +1,6 @@
 import React from 'react';
 
-import { Alignment, Box, Button, Direction, IconButton, InputType, KibaIcon, SingleLineInput, Stack, Text } from '@kibalabs/ui-react';
+import { Alignment, Box, Button, Direction, IconButton, InputType, KibaIcon, Markdown, SingleLineInput, Stack, Text } from '@kibalabs/ui-react';
 
 import { Agent, ChatMessage } from '../client/resources';
 
@@ -9,8 +9,8 @@ import './FloatingChat.scss';
 const SUGGESTED_PROMPTS = [
   "What's my current position?",
   "What's my health factor?",
-  "What are the current rates?",
-  "Why did you take that action?",
+  'What are the current rates?',
+  'Why did you take that action?',
 ];
 
 interface IFloatingChatProps {
@@ -87,57 +87,49 @@ export function FloatingChat(props: IFloatingChatProps): React.ReactElement {
   }, [handleSendMessage]);
 
   return (
-    <div className="floating-chat">
+    <div className='floating-chat'>
       {isOpen && (
-        <div className="chat-window">
-          <div className="chat-header">
+        <div className='chat-window'>
+          <div className='chat-header'>
             <Stack direction={Direction.Horizontal} childAlignment={Alignment.Center} shouldAddGutters={true}>
-              <Text variant="bold">{agent.emoji}</Text>
-              <Text variant="bold">{agent.name}</Text>
+              <Text variant='bold'>{agent.emoji}</Text>
+              <Text variant='bold'>{agent.name}</Text>
             </Stack>
             <IconButton
-              icon={<KibaIcon iconId="ion-close" />}
+              icon={<KibaIcon iconId='ion-close' />}
               onClicked={(): void => setIsOpen(false)}
             />
           </div>
 
-          <div className="messages-container">
+          <div className='messages-container'>
             {messages.length === 0 && !isLoading && (
-              <Box>
-                <Stack direction={Direction.Vertical} shouldAddGutters={true}>
-                  <Text>
-                    Hi! I&apos;m your BorrowBot assistant. Ask me about your position, rates, or any actions I&apos;ve taken.
-                  </Text>
-                </Stack>
+              <Box key='initial' className='message-bubble agent'>
+                <Text>Hi! I&apos;m your BorrowBot assistant. Ask me about your position, rates, or any actions I&apos;ve taken.</Text>
               </Box>
             )}
-            {messages.map((message) => (
-              <div
-                key={message.messageId}
-                className={`message-bubble ${message.isUser ? 'user' : 'agent'}`}
-              >
-                {message.content}
-              </div>
+            {messages.map((message: ChatMessage): React.ReactElement => (
+              <Box key={message.messageId} className={`message-bubble ${message.isUser ? 'user' : 'agent'}`}>
+                <Markdown shouldForceBlock={true} shouldForceWrapper={true} source={message.content} />
+              </Box>
             ))}
             {isLoading && (
-              <div className="message-bubble agent">
-                <div className="typing-indicator">
+              <Box className='message-bubble agent' isFullWidth={false}>
+                <Box className='typing-indicator' isFullWidth={false}>
                   <span />
                   <span />
                   <span />
-                </div>
-              </div>
+                </Box>
+              </Box>
             )}
             <div ref={messagesEndRef} />
           </div>
-
           {messages.length === 0 && !isLoading && (
-            <div className="suggested-prompts">
+            <div className='suggested-prompts'>
               {SUGGESTED_PROMPTS.map((prompt) => (
                 <button
                   key={prompt}
-                  type="button"
-                  className="prompt-chip"
+                  type='button'
+                  className='prompt-chip'
                   onClick={(): void => handlePromptClick(prompt)}
                 >
                   {prompt}
@@ -145,21 +137,20 @@ export function FloatingChat(props: IFloatingChatProps): React.ReactElement {
               ))}
             </div>
           )}
-
-          <div className="input-container">
+          <div className='input-container'>
             <Box shouldClipContent={false} isFullWidth={true}>
               <SingleLineInput
                 inputType={InputType.Text}
                 value={inputValue}
                 onValueChanged={setInputValue}
                 onKeyDown={handleKeyDown}
-                placeholderText="Ask your agent..."
+                placeholderText='Ask your agent...'
                 isEnabled={!isLoading}
               />
             </Box>
             <Button
-              text="Send"
-              variant="primary"
+              text='Send'
+              variant='primary'
               onClicked={(): void => { handleSendMessage(inputValue); }}
               isEnabled={!isLoading && inputValue.trim().length > 0}
             />
@@ -168,8 +159,8 @@ export function FloatingChat(props: IFloatingChatProps): React.ReactElement {
       )}
 
       <button
-        type="button"
-        className="chat-bubble"
+        type='button'
+        className='chat-bubble'
         onClick={(): void => setIsOpen(!isOpen)}
       >
         {isOpen ? '✕' : agent.emoji}

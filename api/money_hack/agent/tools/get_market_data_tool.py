@@ -18,7 +18,7 @@ class GetMarketDataTool(ChatTool[GetMarketDataInput, RuntimeState]):
         )
 
     async def execute_inner(self, runtimeState: RuntimeState, params: GetMarketDataInput) -> str:  # noqa: ARG002
-        collateralMarkets, yieldApy, vaultAddress, vaultName = await runtimeState.agentManager.get_market_data()
+        collateralMarkets, yieldApy, vaultAddress, vaultName = await runtimeState.getMarketData()
         market_data = {
             'yield_vault': {
                 'name': vaultName,

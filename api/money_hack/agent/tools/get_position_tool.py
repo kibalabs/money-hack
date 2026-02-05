@@ -18,7 +18,7 @@ class GetPositionTool(ChatTool[GetPositionInput, RuntimeState]):
         )
 
     async def execute_inner(self, runtimeState: RuntimeState, params: GetPositionInput) -> str:  # noqa: ARG002
-        position = await runtimeState.agentManager.get_position(user_address=runtimeState.walletAddress)
+        position = await runtimeState.getPosition(runtimeState.walletAddress)
         if position is None:
             return 'The user does not have an active lending position.'
         position_data = {

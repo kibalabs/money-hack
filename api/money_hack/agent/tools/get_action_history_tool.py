@@ -22,7 +22,7 @@ class GetActionHistoryTool(ChatTool[GetActionHistoryInput, RuntimeState]):
         )
 
     async def execute_inner(self, runtimeState: RuntimeState, params: GetActionHistoryInput) -> str:
-        actions = await runtimeState.agentManager.databaseStore.get_agent_actions(
+        actions = await runtimeState.databaseStore.get_agent_actions(
             agentId=runtimeState.agentId,
             limit=params.limit,
         )

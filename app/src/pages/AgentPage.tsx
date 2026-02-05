@@ -1,6 +1,6 @@
 import React from 'react';
 
-import { useNavigator } from '@kibalabs/core-react';
+import { useLocalStorageState, useNavigator } from '@kibalabs/core-react';
 import { Alignment, Box, Button, Direction, PaddingSize, Stack, Text } from '@kibalabs/ui-react';
 import { useToastManager } from '@kibalabs/ui-react-toast';
 
@@ -12,7 +12,7 @@ import { useGlobals } from '../GlobalsContext';
 
 export function AgentPage(): React.ReactElement {
   const { accountAddress, authToken, isWeb3AccountLoggedIn, logout } = useAuth();
-  const { moneyHackClient } = useGlobals();
+  const { moneyHackClient, localStorageClient } = useGlobals();
   const navigator = useNavigator();
   const toastManager = useToastManager();
 
@@ -22,6 +22,13 @@ export function AgentPage(): React.ReactElement {
   const [isLoading, setIsLoading] = React.useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = React.useState<boolean>(false);
   const hasLoadedRef = React.useRef<boolean>(false);
+  const [conversationId, setConversationId] = useLocalStorageState(`borrowbot-${accountAddress || 'default'}-conversationId`, localStorageClient);
+
+  React.useEffect((): void => {
+    if (!conversationId && accountAddress) {
+      setConversationId(crypto.randomUUID());
+    }
+  }, [conversationId, setConversationId, accountAddress]);
 
   const loadData = React.useCallback(async (showLoading: boolean = true): Promise<void> => {
     if (!accountAddress || !authToken) return;
@@ -77,28 +84,28 @@ export function AgentPage(): React.ReactElement {
   }, [toastManager]);
 
   const handleSendChatMessage = React.useCallback(async (message: string): Promise<ChatMessage[]> => {
-    if (!accountAddress || !authToken || !agent) {
+    if (!accountAddress || !authToken || !agent || !conversationId) {
       throw new Error('Not authenticated');
     }
     const response = await moneyHackClient.sendChatMessage(
       accountAddress,
       agent.agentId,
       message,
-      null,
+      conversationId,
       authToken,
     );
     return response.messages;
-  }, [accountAddress, authToken, agent, moneyHackClient]);
+  }, [accountAddress, authToken, agent, moneyHackClient, conversationId]);
 
   const handleLoadChatHistory = React.useCallback(async (): Promise<ChatMessage[]> => {
-    if (!accountAddress || !authToken || !agent) {
+    if (!accountAddress || !authToken || !agent || !conversationId) {
       return [];
     }
     try {
       const response = await moneyHackClient.getChatHistory(
         accountAddress,
         agent.agentId,
-        null,
+        conversationId,
         50,
         authToken,
       );
@@ -107,7 +114,7 @@ export function AgentPage(): React.ReactElement {
       console.error('Failed to load chat history:', error);
       return [];
     }
-  }, [accountAddress, authToken, agent, moneyHackClient]);
+  }, [accountAddress, authToken, agent, moneyHackClient, conversationId]);
 
   if (!isWeb3AccountLoggedIn || isLoading) {
     return (

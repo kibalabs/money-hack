@@ -12,7 +12,7 @@ from core.util.typing_util import JsonObject
 class GeminiLLM:
     """LLM client for Google Gemini API."""
 
-    def __init__(self, apiKey: str, requester: Requester, modelId: str = 'gemini-2.0-flash') -> None:
+    def __init__(self, apiKey: str, requester: Requester, modelId: str = 'gemini-3-flash-preview') -> None:
         self.apiKey = apiKey
         self.requester = requester
         self.endpoint = f'https://generativelanguage.googleapis.com/v1beta/models/{modelId}:generateContent'

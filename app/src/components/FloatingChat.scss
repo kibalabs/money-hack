@@ -75,12 +75,23 @@
 
 .message-bubble {
   max-width: 85%;
-  padding: 12px var(--kiba-padding-wide);
+  padding: 0 var(--kiba-padding-wide);
   border-radius: var(--kiba-border-radius);
   color: var(--kiba-color-text);
   font-size: 14px;
   line-height: 1.5;
-  white-space: pre-wrap;
+  // white-space: pre-wrap;
+
+  // Markdown styling
+  .KibaMarkdown {
+    & > *:first-child {
+      margin-top: 0;
+    }
+
+    & > *:last-child {
+      margin-bottom: 0;
+    }
+  }
 
   &.user {
     background: linear-gradient(135deg, var(--kiba-color-brand-primary) 0%, var(--kiba-color-brand-secondary) 100%);
@@ -129,8 +140,9 @@
 
 .typing-indicator {
   display: flex;
+  flex-direction: row;
   gap: 4px;
-  padding: 4px 0;
+  padding: var(--kiba-padding-wide);
 
   span {
     width: 8px;

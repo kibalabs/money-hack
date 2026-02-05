@@ -24,15 +24,15 @@ class SetTargetLtvTool(ChatTool[SetTargetLtvInput, RuntimeState]):
     async def execute_inner(self, runtimeState: RuntimeState, params: SetTargetLtvInput) -> str:
         if params.target_ltv < 0.50 or params.target_ltv > 0.80:  # noqa: PLR2004
             return f'Invalid target LTV: {params.target_ltv}. Target LTV must be between 0.50 (50%) and 0.80 (80%).'
-        position = await runtimeState.agentManager.databaseStore.get_position_by_agent(agentId=runtimeState.agentId)
+        position = await runtimeState.databaseStore.get_position_by_agent(agentId=runtimeState.agentId)
         if position is None:
             return 'Cannot set target LTV: no active position found.'
         old_ltv = position.targetLtv
-        await runtimeState.agentManager.databaseStore.update_position(
+        await runtimeState.databaseStore.update_position(
             agentPositionId=position.agentPositionId,
             targetLtv=params.target_ltv,
         )
-        await runtimeState.agentManager.databaseStore.log_agent_action(
+        await runtimeState.databaseStore.log_agent_action(
             agentId=runtimeState.agentId,
             actionType='ltv_change',
             value=f'{params.target_ltv * 100:.1f}%',

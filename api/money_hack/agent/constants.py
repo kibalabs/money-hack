@@ -18,7 +18,20 @@ BorrowBot is an AI-powered lending agent that helps users earn yield through ove
 - **Health Factor**: A measure of how safe your position is. Below 1.0 means liquidation risk
 - **Target LTV**: The LTV ratio the agent aims to maintain. It will rebalance when the actual LTV deviates significantly
 - **Auto-Rebalance**: When prices move, the agent may repay some debt (if LTV too high) or borrow more (if LTV too low)
-- **Liquidation**: If LTV exceeds the maximum (around 86%), your collateral can be sold to repay the loan
+- **Max LTV (Liquidation Threshold)**: The strict limit (e.g., 86%) set by the protocol. If your LTV touches this, liquidation occurs immediately.
+- **Liquidation**: If LTV > Max LTV, a third party repays your loan and seizes an equivalent amount of your collateral **plus a penalty**.
+- **Liquidation Cost**: In Morpho Blue, this penalty is typically typically a few percent (e.g., 2-5%) of the amount repaid. This is collateral you lose permanently.
+
+### Liquidation Example (Practical)
+*Scenario*: You have **$100 in Collateral** and **$85 in Debt**.
+1. **Trigger**: If collateral value drops slightly (e.g., to $98), your LTV rises above the max allowed (e.g., 86%).
+2. **Action**: A liquidator pays off your $85 debt.
+3. **Penalty**: To reimburse themselves, they seize $85 worth of your collateral **plus a penalty** (e.g., roughly 3-5%).
+4. **Outcome**:
+   - You keep the $85 USDC you borrowed.
+   - The liquidator takes ~$88-$89 worth of your collateral.
+   - You are left with ~$9-$10 of collateral.
+   - **Net Loss**: You effectively lost the ~$3-$4 penalty value compared to if you had just repaid it yourself.
 
 ## Protocols Used
 

@@ -124,6 +124,14 @@ class LtvManager:
                     action_amount=None,
                     reason=f'Repay amount ${repayAmount / 1e6:.2f} below minimum',
                 )
+            # Check if we have enough funds in the vault to auto-repay
+            # Conservatively assume 1 share >= 1 USDC (standard for productive vaults)
+            canAutoRepay = position.vaultShares >= repayAmount
+            actionType = 'auto_repay' if canAutoRepay else 'manual_repay'
+            reason = f'LTV {currentLtv:.2%} exceeds upper threshold {upperThreshold:.2%}'
+            if not canAutoRepay:
+                reason += f'. Insufficient vault funds (${position.vaultShares / 1e6:.2f} < ${repayAmount / 1e6:.2f})'
+
             return LtvCheckResult(
                 position_id=position.agentPositionId,
                 agent_id=position.agentId,
@@ -131,9 +139,9 @@ class LtvManager:
                 target_ltv=position.targetLtv,
                 max_ltv=maxLtv,
                 needs_action=True,
-                action_type='auto_repay',
+                action_type=actionType,
                 action_amount=repayAmount,
-                reason=f'LTV {currentLtv:.2%} exceeds upper threshold {upperThreshold:.2%}',
+                reason=reason,
             )
         if currentLtv < lowerThreshold:
             borrowAmount = int((position.targetLtv * collateralValueUsd - borrowValueUsd) * 1e6)

@@ -109,6 +109,40 @@ class NotificationService:
         )
         return success
 
+    async def send_auto_repay_success(
+        self,
+        agent: Agent,
+        user: User,
+        repayAmount: float,
+        oldLtv: float,
+        newLtv: float,
+        isVaultWithdrawal: bool = True,
+    ) -> bool:
+        """Send notification when auto-repay is executed."""
+        if not user.telegramChatId:
+            return False
+        sourceText = ' from your yield vault' if isVaultWithdrawal else ''
+        message = f'I detected your LTV was high ({oldLtv:.1%}) and automatically withdrew ${repayAmount:.2f}{sourceText} to repay debt. Your position is now healthy at {newLtv:.1%}.'
+        success = await self.telegramClient.send_message(chatId=user.telegramChatId, text=message)
+        await self._log_notification(agentId=agent.agentId, notificationType='auto_repay_success', message=f'Auto-repay executed: ${repayAmount:.2f}. LTV {oldLtv:.1%} -> {newLtv:.1%}', success=success)
+        return success
+
+    async def send_daily_digest(
+        self,
+        agent: Agent,
+        user: User,
+        currentLtv: float,
+        collateralValue: float,
+        debtValue: float,
+    ) -> bool:
+        """Send daily digest notification."""
+        if not user.telegramChatId:
+            return False
+        message = f'Daily Update: Everything is healthy. 🟢\nCurrent LTV: {currentLtv:.1%}\nCollateral: ${collateralValue:.2f}\nDebt: ${debtValue:.2f}\nNo action needed.'
+        success = await self.telegramClient.send_message(chatId=user.telegramChatId, text=message)
+        await self._log_notification(agentId=agent.agentId, notificationType='daily_digest', message='Daily digest sent.', success=success)
+        return success
+
     async def send_position_closed(
         self,
         agent: Agent,

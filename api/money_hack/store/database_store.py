@@ -214,6 +214,17 @@ class DatabaseStore:
             limit=limit,
         )
 
+    async def get_latest_action_by_type(self, agentId: str, actionType: str) -> AgentAction | None:
+        actions = await AgentActionsRepository.list_many(
+            database=self.database,
+            fieldFilters=[
+                UUIDFieldFilter(fieldName='agentId', eq=agentId),
+                StringFieldFilter(fieldName='actionType', eq=actionType),
+            ],
+            limit=1,
+        )
+        return actions[0] if actions else None
+
     async def create_chat_event(
         self,
         userId: str,

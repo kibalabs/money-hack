@@ -909,7 +909,9 @@ class AgentManager(Authorizer):
             conversationId=conversationId,
             walletAddress=normalizedAddress,
             chainId=self.chainId,
-            agentManager=self,
+            databaseStore=self.databaseStore,
+            getMarketData=self.get_market_data,
+            getPosition=self.get_position,
         )
         systemPrompt = BORROWBOT_SYSTEM_PROMPT.format(agent_name=f'{agent.emoji} {agent.name}')
         userPrompt = BORROWBOT_USER_PROMPT

@@ -1,16 +1,13 @@
-from __future__ import annotations
-
-from typing import TYPE_CHECKING
+from collections.abc import Callable
+from collections.abc import Coroutine
+from typing import Any
 
 from pydantic import BaseModel
 
-if TYPE_CHECKING:
-    from money_hack.agent_manager import AgentManager
+from money_hack.store.database_store import DatabaseStore
 
 
-class RuntimeState(BaseModel):
-    """Runtime state passed to chat tools during execution."""
-
+class RuntimeState(BaseModel):  # type: ignore[explicit-any]
     class Config:
         arbitrary_types_allowed = True
 
@@ -19,22 +16,6 @@ class RuntimeState(BaseModel):
     conversationId: str
     walletAddress: str
     chainId: int
-    agentManager: AgentManager
-
-    def __init__(
-        self,
-        userId: str,
-        agentId: str,
-        conversationId: str,
-        walletAddress: str,
-        chainId: int,
-        agentManager: AgentManager,
-    ) -> None:
-        super().__init__(
-            userId=userId,
-            agentId=agentId,
-            conversationId=conversationId,
-            walletAddress=walletAddress,
-            chainId=chainId,
-            agentManager=agentManager,
-        )
+    databaseStore: DatabaseStore
+    getMarketData: Callable[[], Coroutine[Any, Any, Any]]  # type: ignore[explicit-any]
+    getPosition: Callable[[str], Coroutine[Any, Any, Any]]  # type: ignore[explicit-any]
