@@ -405,109 +405,93 @@ class AgentManager(Authorizer):  # Core manager
         logging.info(f'User operation confirmed: {transactionHash}')
         return transactionHash
 
-    async def monitor_positions_loop(self) -> None:
+    async def check_positions_once(self) -> None:
+        """Check all active positions once and take necessary actions. Should be called within a database context."""
         if not self.ltvManager or not self.notificationService:
-            logging.error('LTV Manager or Notification Service not configured. Monitor loop aborted.')
+            logging.error('LTV Manager or Notification Service not configured.')
             return
-
-        LTV_CHECK_INTERVAL_SECONDS = 300
         CRITICAL_LTV_THRESHOLD = 0.80
-        # WARN_INTERVAL_HOURS = 4  # Disabled for testing
-        # URGENT_INTERVAL_HOURS = 1  # Disabled for testing
-
-        while True:
+        positions = await self.databaseStore.get_all_active_positions()
+        logging.info(f'Checking LTV for {len(positions)} active positions')
+        for position in positions:
             try:
-                positions = await self.databaseStore.get_all_active_positions()
-                logging.info(f'Checking LTV for {len(positions)} active positions')
-                for position in positions:
+                result = await self.ltvManager.check_position_ltv(position)
+                await self.ltvManager.log_ltv_check(result)
+                agent = await self.databaseStore.get_agent(agentId=position.agentId)
+                if not agent:
+                    continue
+                user = await self.databaseStore.get_user(userId=agent.userId)
+                if not user:
+                    continue
+                # Handle Action
+                if result.needs_action and result.action_type == 'auto_repay':
+                    logging.info(f'Position {position.agentPositionId}: Auto-repaying {result.action_amount} USDC')
                     try:
-                        result = await self.ltvManager.check_position_ltv(position)
-                        await self.ltvManager.log_ltv_check(result)
-
-                        agent = await self.databaseStore.get_agent(agentId=position.agentId)
-                        if not agent:
-                            continue
-                        user = await self.databaseStore.get_user(userId=agent.userId)
-                        if not user:
-                            continue
-
-                        # Handle Action
-                        if result.needs_action and result.action_type == 'auto_repay':
-                            logging.info(f'Position {position.agentPositionId}: Auto-repaying {result.action_amount} USDC')
-                            try:
-                                actionTx = await self.ltvManager.build_auto_repay_transactions(
-                                    position=position,
-                                    repayAmount=result.action_amount or 0,
-                                    userAddress=agent.walletAddress,
-                                )
-                                calls = [EncodedCall(toAddress=tx.to, data=HexBytes(tx.data).hex(), value=int(tx.value)) for tx in actionTx.transactions]
-                                await self._send_user_operation(
-                                    agentWalletAddress=agent.walletAddress,
-                                    calls=calls,
-                                )
-                                await self.notificationService.send_auto_repay_success(
-                                    agent=agent,
-                                    user=user,
-                                    repayAmount=float(result.action_amount or 0) / 1e6,  # Assuming 6 decimals for USDC
-                                    oldLtv=result.current_ltv,
-                                    newLtv=result.target_ltv,  # Approximate new LTV
-                                )
-                            except Exception:  # noqa: BLE001
-                                logging.exception(f'Failed to auto-repay for position {position.agentPositionId}')
-                                # Fallback to warning handled below if condition persists next check
-
-                        # Handle Warnings (Manual Repay or Critical Threshold)
-                        currentLtv = result.current_ltv
-                        maxLtv = result.max_ltv
-                        isCritical = currentLtv >= CRITICAL_LTV_THRESHOLD * maxLtv and maxLtv > 0
-                        if (result.needs_action and result.action_type == 'manual_repay') or isCritical:
-                            # Temporarily disabled throttling - send all messages for testing/agent thoughts
-                            # lastWarning = await self.databaseStore.get_latest_action_by_type(agent.agentId, 'critical_ltv_warning')
-                            shouldWarn = True
-                            # if lastWarning:
-                            #     timeSince = datetime.now(tz=UTC) - lastWarning.createdDate.replace(tzinfo=UTC)
-                            #     interval = URGENT_INTERVAL_HOURS if isCritical else WARN_INTERVAL_HOURS
-                            #     if timeSince.total_seconds() < interval * 3600:
-                            #         shouldWarn = False
-
-                            if shouldWarn:
-                                await self.notificationService.send_critical_ltv_warning(
-                                    agent=agent,
-                                    user=user,
-                                    currentLtv=currentLtv,
-                                    maxLtv=maxLtv,
-                                )
-                        elif result.needs_action:
-                            logging.warning(f'Position {position.agentPositionId} needs action: {result.action_type} - {result.reason}')
-
-                        # Daily Digest
-                        # Temporarily disabled throttling - send all messages for testing/agent thoughts
-                        # lastDigest = await self.databaseStore.get_latest_action_by_type(agent.agentId, 'daily_digest')
-                        shouldSendDigest = True
-                        # if lastDigest:
-                        #     # Use aware datetime for comparison
-                        #     lastCreated = lastDigest.createdDate.replace(tzinfo=UTC) if lastDigest.createdDate.tzinfo is None else lastDigest.createdDate
-                        #     timeSince = datetime.now(tz=UTC) - lastCreated
-                        #     if timeSince.total_seconds() < 24 * 3600:
-                        #         shouldSendDigest = False
-
-                        if shouldSendDigest and not result.needs_action and not isCritical:
-                            priceData = await self.alchemyClient.get_asset_current_price(chainId=self.chainId, assetAddress=position.collateralAsset)
-                            collateralValue = (position.collateralAmount / 1e18) * priceData.priceUsd
-                            debtValue = position.borrowAmount / 1e6
-                            await self.notificationService.send_daily_digest(
-                                agent=agent,
-                                user=user,
-                                currentLtv=currentLtv,
-                                collateralValue=collateralValue,
-                                debtValue=debtValue,
-                            )
-
+                        actionTx = await self.ltvManager.build_auto_repay_transactions(
+                            position=position,
+                            repayAmount=result.action_amount or 0,
+                            userAddress=agent.walletAddress,
+                        )
+                        calls = [EncodedCall(toAddress=tx.to, data=HexBytes(tx.data).hex(), value=int(tx.value)) for tx in actionTx.transactions]
+                        await self._send_user_operation(
+                            agentWalletAddress=agent.walletAddress,
+                            calls=calls,
+                        )
+                        await self.notificationService.send_auto_repay_success(
+                            agent=agent,
+                            user=user,
+                            repayAmount=float(result.action_amount or 0) / 1e6,  # Assuming 6 decimals for USDC
+                            oldLtv=result.current_ltv,
+                            newLtv=result.target_ltv,  # Approximate new LTV
+                        )
                     except Exception:  # noqa: BLE001
-                        logging.exception(f'Error checking position {position.agentPositionId}')
+                        logging.exception(f'Failed to auto-repay for position {position.agentPositionId}')
+                        # Fallback to warning handled below if condition persists next check
+                # Handle Warnings (Manual Repay or Critical Threshold)
+                currentLtv = result.current_ltv
+                maxLtv = result.max_ltv
+                isCritical = currentLtv >= CRITICAL_LTV_THRESHOLD * maxLtv and maxLtv > 0
+                if (result.needs_action and result.action_type == 'manual_repay') or isCritical:
+                    # Temporarily disabled throttling - send all messages for testing/agent thoughts
+                    # lastWarning = await self.databaseStore.get_latest_action_by_type(agent.agentId, 'critical_ltv_warning')
+                    shouldWarn = True
+                    # if lastWarning:
+                    #     timeSince = datetime.now(tz=UTC) - lastWarning.createdDate.replace(tzinfo=UTC)
+                    #     interval = URGENT_INTERVAL_HOURS if isCritical else WARN_INTERVAL_HOURS
+                    #     if timeSince.total_seconds() < interval * 3600:
+                    #         shouldWarn = False
+                    if shouldWarn:
+                        await self.notificationService.send_critical_ltv_warning(
+                            agent=agent,
+                            user=user,
+                            currentLtv=currentLtv,
+                            maxLtv=maxLtv,
+                        )
+                elif result.needs_action:
+                    logging.warning(f'Position {position.agentPositionId} needs action: {result.action_type} - {result.reason}')
+                # Daily Digest
+                # Temporarily disabled throttling - send all messages for testing/agent thoughts
+                # lastDigest = await self.databaseStore.get_latest_action_by_type(agent.agentId, 'daily_digest')
+                shouldSendDigest = True
+                # if lastDigest:
+                #     # Use aware datetime for comparison
+                #     lastCreated = lastDigest.createdDate.replace(tzinfo=UTC) if lastDigest.createdDate.tzinfo is None else lastDigest.createdDate
+                #     timeSince = datetime.now(tz=UTC) - lastCreated
+                #     if timeSince.total_seconds() < 24 * 3600:
+                #         shouldSendDigest = False
+                if shouldSendDigest and not result.needs_action and not isCritical:
+                    priceData = await self.alchemyClient.get_asset_current_price(chainId=self.chainId, assetAddress=position.collateralAsset)
+                    collateralValue = (position.collateralAmount / 1e18) * priceData.priceUsd
+                    debtValue = position.borrowAmount / 1e6
+                    await self.notificationService.send_daily_digest(
+                        agent=agent,
+                        user=user,
+                        currentLtv=currentLtv,
+                        collateralValue=collateralValue,
+                        debtValue=debtValue,
+                    )
             except Exception:  # noqa: BLE001
-                logging.exception('Error in position monitoring loop')
-            await asyncio.sleep(LTV_CHECK_INTERVAL_SECONDS)
+                logging.exception(f'Error checking position {position.agentPositionId}')
 
     async def _execute_agent_deploy_transactions(self, agentWalletAddress: str, userAddress: str, collateralAssetAddress: str, collateralAmount: str, targetLtv: float) -> str | None:
         if self.coinbaseCdpClient is None or self.coinbaseSmartWallet is None or self.coinbaseBundler is None or self.deployerPrivateKey is None:

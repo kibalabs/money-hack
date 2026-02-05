@@ -23,8 +23,15 @@ async def main() -> None:
     agentManager = create_agent_manager()
     await agentManager.databaseStore.database.connect(poolSize=2)
     logging.info('Worker started, beginning AgentManager monitoring loop...')
+    LTV_CHECK_INTERVAL_SECONDS = 300
     try:
-        await agentManager.monitor_positions_loop()
+        while True:
+            try:
+                async with agentManager.databaseStore.database.create_context_connection():
+                    await agentManager.check_positions_once()
+            except Exception:  # noqa: BLE001
+                logging.exception('Error in position monitoring loop')
+            await asyncio.sleep(LTV_CHECK_INTERVAL_SECONDS)
     finally:
         await agentManager.requester.close_connections()
         await agentManager.databaseStore.database.disconnect()
