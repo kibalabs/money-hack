@@ -292,6 +292,155 @@ See [ens-integration.md](ens-integration.md) for detailed spec.
 
 ---
 
+## Implementation Complete ✓
+
+All core phases have been implemented:
+
+- **Phases 1-4E**: Foundation, Telegram OAuth, Database, Agent Creation, Webhooks
+- **Phase 5**: Withdrawals & Position Management
+- **Phase 6**: Autonomous LTV Management (background worker)
+- **Phase 7**: Telegram Notifications
+- **Phase 8**: ENS Integration
+
+---
+
+## Next Steps
+
+### 🔄 Phase 10: Chat Interface (In Progress)
+
+**Goal**: Add an AI-powered floating chat so the agent can explain its actions and answer user questions
+
+**Decisions Made:**
+- LLM: Google Gemini (same as agent-hack)
+- UI: Floating chat bubble on AgentPage
+- Agent capabilities: Read-only + ability to change target LTV
+- Conversations: Separate for web and Telegram (not synced)
+
+#### Backend Implementation
+
+**1. LLM Integration** (`api/money_hack/agent/gemini_llm.py`)
+- `GeminiLLM` class using Google's Generative AI API
+- JSON-structured output for tool calls and messages
+- Retry logic for API failures
+
+**2. Chat Tools** (`api/money_hack/agent/tools/`)
+- `GetPositionTool` - Returns current position (collateral, LTV, borrow amount, vault balance, health)
+- `GetMarketDataTool` - Returns APYs, prices, market conditions
+- `GetActionHistoryTool` - Returns recent agent actions from tbl_agent_actions
+- `SetTargetLtvTool` - Allows user to change their target LTV via chat (the one write action)
+
+**3. Chat History Store** (`api/money_hack/agent/chat_history_store.py`)
+- Uses existing `tbl_chat_events` table
+- Event types: 'user', 'agent', 'prompt', 'step', 'tool'
+- Separate conversation IDs for web (`web_{agentId}`) and Telegram (`telegram_{chatId}`)
+
+**4. Chat Bot** (`api/money_hack/agent/chat_bot.py`)
+- Agentic loop: prompt → LLM → tool call or message → repeat
+- Context includes: conversation history, tool descriptions, current context
+- Stops when LLM returns `isComplete: true`
+
+**5. API Endpoints**
+- `POST /v1/users/{userAddress}/agents/{agentId}/chat` - Non-streaming chat
+- `POST /v1/users/{userAddress}/agents/{agentId}/chat-stream` - Streaming (NDJSON)
+
+#### Frontend Implementation
+
+**Floating Chat Component** (`app/src/components/FloatingChat.tsx`)
+- Minimized: Chat bubble icon with agent emoji
+- Expanded: Full chat window overlay (not a modal, positioned bottom-right)
+- Features:
+  - Message list with timestamps
+  - Auto-scroll to latest
+  - Typing indicator during streaming
+  - Suggested prompts: "What's my current position?", "Why did you take that action?", "What are the risks?"
+
+**Chat API Client Methods**
+- `sendChatMessage(agentId, message)` - Non-streaming
+- `sendChatMessageStreamed(agentId, message, onMessage)` - Streaming with NDJSON parsing
+
+#### System Prompt
+
+The BorrowBot agent prompt includes:
+1. Agent identity (name, emoji, role as DeFi lending assistant)
+2. Knowledge of Morpho Blue overcollateralized lending
+3. Knowledge of Yo.xyz/40acres yield vault
+4. Understanding of LTV, health factor, liquidation risks
+5. Ability to explain autonomous actions (auto-rebalance, auto-repay)
+6. Instructions to use tools for real-time data, never guess values
+
+---
+
+### 🔄 Phase 11: Telegram Chat Integration (In Progress)
+
+**Goal**: Allow users to chat with their agent via Telegram
+
+#### Implementation
+- Update `process_telegram_webhook` to route messages to ChatBot
+- Use `telegram_{chatId}` as conversation ID (separate from web)
+- Stream responses back to Telegram via `telegramClient.send_message()`
+- Handle `/start` command separately
+- Plaintext formatting (no markdown) for Telegram messages
+
+#### Telegram-Specific Features
+- Proactive notifications (position alerts) use existing NotificationService
+- User messages routed to AI for intelligent responses
+- Can change target LTV via natural language ("Set my LTV to 70%")
+
+---
+
+### 🔲 Phase 12: Auto-Navigate to Agent
+
+**Goal**: Streamline UX for returning users
+
+#### Frontend
+- On app load, check if user already has an agent
+- If agent exists, redirect directly to `/agent` instead of showing setup
+- Show "Create New Agent" option if they want additional agents
+
+#### Implementation
+- Add `GET /v1/users/{userAddress}/agents` to check for existing agents
+- Frontend useEffect on HomePage to auto-redirect
+- Consider showing agent selector if user has multiple agents
+
+---
+
+### 🔲 Phase 13: ENS Basescan Labels
+
+**Goal**: Show ENS name labels in Basescan for agent wallets
+
+#### Research Needed
+- Investigate Basescan's label integration options
+- ENS reverse resolution may auto-display if properly configured
+- May need to register reverse record for agent wallet → ENS name
+
+#### Implementation
+- Ensure ENS subdomain has proper reverse resolution set
+- Agent wallet should resolve to `agentname.borrowbot.eth` in block explorers
+- Set reverse record during ENS subdomain registration
+- Adds legitimacy and recognizability to agent transactions
+
+---
+
+### 🔲 Phase 14: Uniswap Integration
+
+**Goal**: Use Uniswap for all swaps instead of 0x
+
+#### Why Uniswap
+- More recognizable for users and judges
+- Better composability with other DeFi primitives
+- Uniswap v4 hooks potential for future features
+- Clear branding/hackathon visibility
+
+#### Implementation
+- Replace any 0x swap logic with Uniswap Router calls
+- Support swaps for:
+  - Converting collateral types if needed
+  - Handling non-USDC assets
+  - Yield token claims/conversions
+- Add Uniswap logo/branding to swap UI components
+
+---
+
 ### 🔲 Phase 9: Agent Wallet & Security (Stretch)
 
 **Goal**: Use ERC-4337 agent wallets for secure autonomous execution
@@ -303,35 +452,15 @@ See [ens-integration.md](ens-integration.md) for detailed spec.
 
 ---
 
-## Implementation Priority (Hackathon Focus)
-
-**Must Have (Demo-Ready):**
-1. ✅ Phase 1-4B: Foundation complete
-2. 🔲 Phase 4C: Database schema (users, agents, positions)
-3. 🔲 Phase 4D: Agent creation flow (name + emoji)
-4. 🔲 Phase 4E: Telegram webhook (complete OAuth flow)
-5. 🔲 Phase 8: ENS integration (hackathon prize category)
-
-**Nice to Have:**
-- Phase 5: Withdrawals
-- Phase 7: Telegram notifications
-
-**Stretch:**
-- Phase 6: Autonomous management
-- Phase 9: ERC-4337 agent wallets
-
----
-
-## Data Model Summary (matching agent-hack pattern)
+## Data Model Summary
 
 ```
 ┌─────────────────┐      ┌─────────────────┐
 │    tbl_users    │      │  tbl_user_wallets│
 │                 │      │                  │
 │  id (UUID PK)   │◄────►│  user_id (FK)    │
-│  username       │      │  wallet_address  │
-│  telegram_id    │      └──────────────────┘
-│  telegram_chat_id│
+│  telegram_id    │      │  wallet_address  │
+│  telegram_chat_id│     └──────────────────┘
 └────────┬────────┘
          │
          │ 1:N
@@ -357,19 +486,6 @@ See [ens-integration.md](ens-integration.md) for detailed spec.
 │  details (JSON) │      │  content (JSON)  │
 └─────────────────┘      └──────────────────┘
 ```
-
----
-
-## Implementation Complete ✓
-
-**Phase 4**: Full on-chain position creation with sequential transaction signing
-**Phase 4B**: Complete Telegram OAuth integration with SetupPage flow
-
-### What's Next?
-1. **Phase 4C**: Database schema migration (PostgreSQL)
-2. **Phase 4D**: Agent creation flow (name, emoji, ENS subdomain)
-3. **Phase 4E**: Telegram webhook for complete OAuth flow
-4. **Phase 8**: ENS integration for hackathon prize
 
 ---
 

@@ -5,7 +5,8 @@ import { Alignment, Box, Button, Direction, PaddingSize, Stack, Text } from '@ki
 import { useToastManager } from '@kibalabs/ui-react-toast';
 
 import { useAuth } from '../AuthContext';
-import { MarketData, Position } from '../client/resources';
+import { Agent, ChatMessage, MarketData, Position } from '../client/resources';
+import { FloatingChat } from '../components/FloatingChat';
 import { PositionDashboard } from '../components/PositionDashboard';
 import { useGlobals } from '../GlobalsContext';
 
@@ -17,6 +18,7 @@ export function AgentPage(): React.ReactElement {
 
   const [position, setPosition] = React.useState<Position | null>(null);
   const [marketData, setMarketData] = React.useState<MarketData | null>(null);
+  const [agent, setAgent] = React.useState<Agent | null>(null);
   const [isLoading, setIsLoading] = React.useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = React.useState<boolean>(false);
   const hasLoadedRef = React.useRef<boolean>(false);
@@ -29,9 +31,10 @@ export function AgentPage(): React.ReactElement {
       setIsRefreshing(true);
     }
     try {
-      const [fetchedPosition, fetchedMarketData] = await Promise.all([
+      const [fetchedPosition, fetchedMarketData, fetchedAgent] = await Promise.all([
         moneyHackClient.getPosition(accountAddress, authToken),
         moneyHackClient.getMarketData(),
+        moneyHackClient.getAgent(accountAddress, authToken),
       ]);
       if (!fetchedPosition) {
         navigator.navigateTo('/setup');
@@ -39,6 +42,7 @@ export function AgentPage(): React.ReactElement {
       }
       setPosition(fetchedPosition);
       setMarketData(fetchedMarketData);
+      setAgent(fetchedAgent);
     } catch (error) {
       console.error('Failed to load position:', error);
       toastManager.showTextToast('Failed to load position data', 'error');
@@ -71,6 +75,39 @@ export function AgentPage(): React.ReactElement {
   const handleClosePositionClicked = React.useCallback((): void => {
     toastManager.showTextToast('Close position functionality coming soon', 'info');
   }, [toastManager]);
+
+  const handleSendChatMessage = React.useCallback(async (message: string): Promise<ChatMessage[]> => {
+    if (!accountAddress || !authToken || !agent) {
+      throw new Error('Not authenticated');
+    }
+    const response = await moneyHackClient.sendChatMessage(
+      accountAddress,
+      agent.agentId,
+      message,
+      null,
+      authToken,
+    );
+    return response.messages;
+  }, [accountAddress, authToken, agent, moneyHackClient]);
+
+  const handleLoadChatHistory = React.useCallback(async (): Promise<ChatMessage[]> => {
+    if (!accountAddress || !authToken || !agent) {
+      return [];
+    }
+    try {
+      const response = await moneyHackClient.getChatHistory(
+        accountAddress,
+        agent.agentId,
+        null,
+        50,
+        authToken,
+      );
+      return response.messages;
+    } catch (error) {
+      console.error('Failed to load chat history:', error);
+      return [];
+    }
+  }, [accountAddress, authToken, agent, moneyHackClient]);
 
   if (!isWeb3AccountLoggedIn || isLoading) {
     return (
@@ -120,6 +157,14 @@ export function AgentPage(): React.ReactElement {
           <Button text='Disconnect' variant='tertiary-small' onClicked={logout} />
         </Stack>
       </Box>
+
+      {agent && (
+        <FloatingChat
+          agent={agent}
+          onSendMessage={handleSendChatMessage}
+          onLoadHistory={handleLoadChatHistory}
+        />
+      )}
     </Stack>
   );
 }

@@ -3,21 +3,21 @@
   max-width: 600px;
 
   .statCard {
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 12px;
-    padding: 16px;
+    background: var(--box-background-color);
+    border: 1px solid var(--box-border-color);
+    border-radius: var(--kiba-border-radius);
+    padding: var(--kiba-padding-wide);
     transition: border-color 0.2s ease;
 
     &:hover {
-      border-color: rgba(255, 255, 255, 0.15);
+      border-color: var(--accordion-hover-border);
     }
   }
 
   .healthGauge {
     width: 100%;
     height: 8px;
-    background: rgba(255, 255, 255, 0.1);
+    background: var(--box-border-color);
     border-radius: 4px;
     overflow: hidden;
     position: relative;
@@ -28,15 +28,15 @@
       transition: width 0.3s ease, background-color 0.3s ease;
 
       &.healthy {
-        background: linear-gradient(90deg, #27ec6f, #1ed760);
+        background: linear-gradient(90deg, var(--kiba-color-success), var(--kiba-color-success-light10));
       }
 
       &.warning {
-        background: linear-gradient(90deg, #f0b90b, #f5a623);
+        background: linear-gradient(90deg, var(--kiba-color-warning), var(--kiba-color-warning-light10));
       }
 
       &.danger {
-        background: linear-gradient(90deg, #ff4d4f, #e03838);
+        background: linear-gradient(90deg, var(--kiba-color-error), var(--kiba-color-error-light10));
       }
     }
   }
@@ -50,23 +50,23 @@
       display: inline-flex;
       align-items: center;
       padding: 4px 10px;
-      border-radius: 16px;
+      border-radius: var(--kiba-border-radius);
       font-size: 12px;
       font-weight: 600;
 
       &.healthy {
-        background: rgba(39, 236, 111, 0.15);
-        color: #27ec6f;
+        background: var(--kiba-color-success-clear90);
+        color: var(--kiba-color-success);
       }
 
       &.warning {
-        background: rgba(240, 185, 11, 0.15);
-        color: #f0b90b;
+        background: var(--kiba-color-warning-clear90);
+        color: var(--kiba-color-warning);
       }
 
       &.danger {
-        background: rgba(255, 77, 79, 0.15);
-        color: #ff4d4f;
+        background: var(--kiba-color-error-clear90);
+        color: var(--kiba-color-error);
       }
     }
   }
@@ -84,7 +84,7 @@
 
     .netSpread {
       padding-top: 8px;
-      border-top: 1px solid rgba(255, 255, 255, 0.1);
+      border-top: 1px solid var(--box-border-color);
       margin-top: 4px;
     }
   }

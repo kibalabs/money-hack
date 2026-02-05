@@ -32,9 +32,9 @@
   --kiba-color-background: #050505;
   --kiba-color-brand-primary: #FFA166;
   --kiba-color-brand-secondary: #FDDB7C;
-  --kiba-color-success: #22c55e;
-  --kiba-color-warning: #f59e0b;
-  --kiba-color-error: #ef4444;
+  --kiba-color-success: #66FFA1;
+  --kiba-color-warning: #FFED66;
+  --kiba-color-error: #FF6678;
   --kiba-color-text: #f8fafc;
   --kiba-color-text-on-brand: #000000;
 
@@ -53,7 +53,7 @@
   @media (prefers-color-scheme: light) {
     // Core Colors
     --kiba-color-background: #FFFFFF;
-    --kiba-color-success: #22c55e;
+    --kiba-color-success: #0d9488;  // Teal - complements orange (darker for light mode)
     --kiba-color-warning: #b58108;
     --kiba-color-error: #ef4444;
     --kiba-color-text: #111827;

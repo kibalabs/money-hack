@@ -130,15 +130,9 @@ export function PositionDashboard(props: IPositionDashboardProps): React.ReactEl
             />
           </div>
           <Stack direction={Direction.Horizontal} contentAlignment={Alignment.Start}>
-            <Text variant='note'>
-              Target:
-              {formatPercent(props.position.targetLtv)}
-            </Text>
+            <Text variant='note'>{`Target: ${formatPercent(props.position.targetLtv)}`}</Text>
             <Stack.Item growthFactor={1} shrinkFactor={1} />
-            <Text variant='note'>
-              Max:
-              {formatPercent(maxLtv)}
-            </Text>
+            <Text variant='note'>{`Max: ${formatPercent(maxLtv)}`}</Text>
           </Stack>
         </Stack>
       </Box>
@@ -214,7 +208,7 @@ export function PositionDashboard(props: IPositionDashboardProps): React.ReactEl
       <Stack direction={Direction.Horizontal} shouldAddGutters={true} isFullWidth={true}>
         <Stack.Item growthFactor={1} shrinkFactor={1}>
           <Button
-            variant='secondary'
+            variant='tertiary'
             text='Withdraw USDC'
             onClicked={props.onWithdrawClicked}
             isFullWidth={true}

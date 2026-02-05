@@ -1,4 +1,5 @@
 import os
+from typing import Any
 from urllib.parse import quote_plus
 
 from core.caching.file_cache import FileCache
@@ -6,6 +7,14 @@ from core.requester import Requester
 from core.store.database import Database
 from core.web3.eth_client import RestEthClient
 
+from money_hack.agent.chat_bot import ChatBot
+from money_hack.agent.chat_history_store import ChatHistoryStore
+from money_hack.agent.chat_tool import ChatTool
+from money_hack.agent.gemini_llm import GeminiLLM
+from money_hack.agent.tools import GetActionHistoryTool
+from money_hack.agent.tools import GetMarketDataTool
+from money_hack.agent.tools import GetPositionTool
+from money_hack.agent.tools import SetTargetLtvTool
 from money_hack.agent_manager import AgentManager
 from money_hack.blockchain_data.alchemy_client import AlchemyClient
 from money_hack.blockchain_data.blockscout_client import BlockscoutClient
@@ -31,6 +40,7 @@ MORALIS_API_KEY = os.environ['MORALIS_API_KEY']
 ALCHEMY_API_KEY = os.environ['ALCHEMY_API_KEY']
 BLOCKSCOUT_API_KEY = os.environ['BLOCKSCOUT_API_KEY']
 TELEGRAM_API_TOKEN = os.environ['TELEGRAM_API_TOKEN']
+GEMINI_API_KEY = os.environ['GEMINI_API_KEY']
 API_URL = os.environ['KRT_API_URL']
 APP_URL = os.environ['KRT_APP_URL']
 DB_HOST = os.environ['DB_HOST']
@@ -75,6 +85,15 @@ def create_agent_manager() -> AgentManager:
     databaseConnectionString = f'postgresql+asyncpg://{DB_USERNAME}:{encodedPassword}@{DB_HOST}:{DB_PORT}/{DB_NAME}'
     database = Database(connectionString=databaseConnectionString)
     databaseStore = DatabaseStore(database=database)
+    geminiLlm = GeminiLLM(apiKey=GEMINI_API_KEY, requester=requester) if GEMINI_API_KEY else None
+    chatHistoryStore = ChatHistoryStore(database=database)
+    chatTools: list[ChatTool[Any, Any]] = [  # type: ignore[explicit-any]
+        GetPositionTool(),
+        GetMarketDataTool(),
+        GetActionHistoryTool(),
+        SetTargetLtvTool(),
+    ]
+    chatBot = ChatBot(llm=geminiLlm, historyStore=chatHistoryStore, tools=chatTools) if geminiLlm else None
     agentManager = AgentManager(
         requester=requester,
         chainId=BASE_CHAIN_ID,
@@ -90,5 +109,7 @@ def create_agent_manager() -> AgentManager:
         coinbaseSmartWallet=coinbaseSmartWallet,
         coinbaseBundler=coinbaseBundler,
         deployerPrivateKey=DEPLOYER_PRIVATE_KEY,
+        chatBot=chatBot,
+        chatHistoryStore=chatHistoryStore,
     )
     return agentManager

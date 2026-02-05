@@ -9,6 +9,7 @@ from money_hack.model import AgentAction
 from money_hack.model import AgentPosition
 from money_hack.model import ChatEvent
 from money_hack.model import User
+from money_hack.model import UserWallet
 from money_hack.store.entity_repository import UUIDFieldFilter
 from money_hack.store.schema import AgentActionsRepository
 from money_hack.store.schema import AgentPositionsRepository
@@ -77,6 +78,13 @@ class DatabaseStore:
             telegramChatId=telegramChatId,
             telegramUsername=telegramUsername,
         )
+
+    async def get_user_wallets(self, userId: str) -> list[UserWallet]:
+        wallets = await UserWalletsRepository.list_many(
+            database=self.database,
+            fieldFilters=[UUIDFieldFilter(fieldName='userId', eq=userId)],
+        )
+        return wallets
 
     async def get_agent(self, agentId: str) -> Agent | None:
         return await AgentsRepository.get_one_or_none(
@@ -168,6 +176,7 @@ class DatabaseStore:
         agentPositionId: int,
         collateralAmount: int | None = None,
         borrowAmount: int | None = None,
+        targetLtv: float | None = None,
         vaultShares: int | None = None,
         status: str | None = None,
     ) -> AgentPosition:
@@ -176,6 +185,7 @@ class DatabaseStore:
             agentPositionId=agentPositionId,
             collateralAmount=collateralAmount,
             borrowAmount=borrowAmount,
+            targetLtv=targetLtv,
             vaultShares=vaultShares,
             status=status,
         )

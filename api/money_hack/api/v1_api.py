@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from core.api.api_request import KibaApiRequest
 from core.api.json_route import json_route
 from starlette.routing import Route
@@ -5,6 +7,7 @@ from starlette.routing import Route
 from money_hack.agent_manager import AgentManager
 from money_hack.api import v1_endpoints as endpoints
 from money_hack.api.authorizer import authorize_signature
+from money_hack.api.v1_resources import ChatMessage
 
 
 def create_v1_routes(agentManager: AgentManager) -> list[Route]:
@@ -179,6 +182,52 @@ def create_v1_routes(agentManager: AgentManager) -> list[Route]:
         )
         return endpoints.GetEnsConfigTransactionsResponse(transactions=transactions, ens_name=ensName)
 
+    @json_route(requestType=endpoints.SendChatMessageRequest, responseType=endpoints.SendChatMessageResponse)
+    @authorize_signature(authorizer=agentManager)
+    async def send_chat_message(request: KibaApiRequest[endpoints.SendChatMessageRequest]) -> endpoints.SendChatMessageResponse:
+        userAddress = request.path_params.get('userAddress', '')
+        agentId = request.path_params.get('agentId', '')
+        messages_data, conversationId = await agentManager.send_chat_message(
+            userAddress=userAddress,
+            agentId=agentId,
+            message=request.data.message,
+            conversationId=request.data.conversation_id,
+            channel='web',
+        )
+        messages = [
+            ChatMessage(
+                message_id=int(str(msg['message_id'])),
+                created_date=datetime.fromisoformat(str(msg['created_date'])),
+                is_user=bool(msg['is_user']),
+                content=str(msg['content']),
+            )
+            for msg in messages_data
+        ]
+        return endpoints.SendChatMessageResponse(messages=messages, conversation_id=conversationId)
+
+    @json_route(requestType=endpoints.GetChatHistoryRequest, responseType=endpoints.GetChatHistoryResponse)
+    @authorize_signature(authorizer=agentManager)
+    async def get_chat_history(request: KibaApiRequest[endpoints.GetChatHistoryRequest]) -> endpoints.GetChatHistoryResponse:
+        userAddress = request.path_params.get('userAddress', '')
+        agentId = request.path_params.get('agentId', '')
+        messages_data, conversationId = await agentManager.get_chat_history(
+            userAddress=userAddress,
+            agentId=agentId,
+            conversationId=request.data.conversation_id,
+            limit=request.data.limit,
+            channel='web',
+        )
+        messages = [
+            ChatMessage(
+                message_id=int(str(msg['message_id'])),
+                created_date=datetime.fromisoformat(str(msg['created_date'])),
+                is_user=bool(msg['is_user']),
+                content=str(msg['content']),
+            )
+            for msg in messages_data
+        ]
+        return endpoints.GetChatHistoryResponse(messages=messages, conversation_id=conversationId)
+
     return [
         Route('/v1/collaterals', endpoint=get_supported_collaterals, methods=['GET']),
         Route('/v1/market-data', endpoint=get_market_data, methods=['GET']),
@@ -199,4 +248,6 @@ def create_v1_routes(agentManager: AgentManager) -> list[Route]:
         Route('/v1/telegram-webhook', endpoint=process_telegram_webhook, methods=['POST']),
         Route('/v1/ens/check-name', endpoint=check_ens_name, methods=['POST']),
         Route('/v1/users/{userAddress:str}/ens/config-transactions', endpoint=get_ens_config_transactions, methods=['POST']),
+        Route('/v1/users/{userAddress:str}/agents/{agentId:str}/chat', endpoint=send_chat_message, methods=['POST']),
+        Route('/v1/users/{userAddress:str}/agents/{agentId:str}/chat/history', endpoint=get_chat_history, methods=['GET']),
     ]

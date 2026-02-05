@@ -243,3 +243,35 @@ export class DeployAgentResult {
     );
   };
 }
+
+export class ChatMessage {
+  public constructor(
+    readonly messageId: number,
+    readonly createdDate: Date,
+    readonly isUser: boolean,
+    readonly content: string,
+  ) { }
+
+  public static fromObject = (obj: RawObject): ChatMessage => {
+    return new ChatMessage(
+      Number(obj.message_id),
+      dateFromString(String(obj.created_date)),
+      Boolean(obj.is_user),
+      String(obj.content),
+    );
+  };
+}
+
+export class ChatResponse {
+  public constructor(
+    readonly messages: ChatMessage[],
+    readonly conversationId: string,
+  ) { }
+
+  public static fromObject = (obj: RawObject): ChatResponse => {
+    return new ChatResponse(
+      (obj.messages as RawObject[]).map(ChatMessage.fromObject),
+      String(obj.conversation_id),
+    );
+  };
+}

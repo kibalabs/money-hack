@@ -142,4 +142,20 @@ export class MoneyHackClient extends ServiceClient {
     const response = await this.makeRequest(method, path, request, Endpoints.DeployAgentResponse, this.getHeaders(authToken));
     return new Resources.DeployAgentResult(response.position, response.transactionHash);
   };
+
+  public sendChatMessage = async (userAddress: string, agentId: string, message: string, conversationId: string | null, authToken: string): Promise<Resources.ChatResponse> => {
+    const method = RestMethod.POST;
+    const path = `v1/users/${userAddress}/agents/${agentId}/chat`;
+    const request = new Endpoints.SendChatMessageRequest(message, conversationId);
+    const response = await this.makeRequest(method, path, request, Endpoints.SendChatMessageResponse, this.getHeaders(authToken));
+    return new Resources.ChatResponse(response.messages, response.conversationId);
+  };
+
+  public getChatHistory = async (userAddress: string, agentId: string, conversationId: string | null, limit: number, authToken: string): Promise<Resources.ChatResponse> => {
+    const method = RestMethod.GET;
+    const path = `v1/users/${userAddress}/agents/${agentId}/chat/history`;
+    const request = new Endpoints.GetChatHistoryRequest(conversationId, limit);
+    const response = await this.makeRequest(method, path, request, Endpoints.GetChatHistoryResponse, this.getHeaders(authToken));
+    return new Resources.ChatResponse(response.messages, response.conversationId);
+  };
 }

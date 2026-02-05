@@ -190,3 +190,23 @@ class GetAgentRequest(BaseModel):
 
 class GetAgentResponse(BaseModel):
     agent: resources.Agent | None
+
+
+class SendChatMessageRequest(BaseModel):
+    message: str
+    conversation_id: str | None = None
+
+
+class SendChatMessageResponse(BaseModel):
+    messages: list[resources.ChatMessage]
+    conversation_id: str
+
+
+class GetChatHistoryRequest(BaseModel):
+    conversation_id: str | None = None
+    limit: int = 50
+
+
+class GetChatHistoryResponse(BaseModel):
+    messages: list[resources.ChatMessage]
+    conversation_id: str

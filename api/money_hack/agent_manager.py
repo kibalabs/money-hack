@@ -24,6 +24,12 @@ from web3 import Web3
 from web3.types import TxParams
 
 from money_hack import constants
+from money_hack.agent.chat_bot import ChatBot
+from money_hack.agent.chat_history_store import ChatHistoryStore
+from money_hack.agent.constants import BORROWBOT_SYSTEM_PROMPT
+from money_hack.agent.constants import BORROWBOT_USER_PROMPT
+from money_hack.agent.constants import TELEGRAM_FORMATTING_NOTE
+from money_hack.agent.runtime_state import RuntimeState
 from money_hack.api.authorizer import Authorizer
 from money_hack.api.v1_resources import Agent as AgentResource
 from money_hack.api.v1_resources import AssetBalance
@@ -87,10 +93,12 @@ class AgentManager(Authorizer):
         telegramClient: TelegramClient,
         ensClient: EnsClient,
         databaseStore: DatabaseStore,
-        coinbaseCdpClient: CoinbaseCdpClient,
-        coinbaseSmartWallet: CoinbaseSmartWallet,
-        coinbaseBundler: CoinbaseBundler,
+        coinbaseCdpClient: CoinbaseCdpClient | None,
+        coinbaseSmartWallet: CoinbaseSmartWallet | None,
+        coinbaseBundler: CoinbaseBundler | None,
         deployerPrivateKey: str,
+        chatBot: ChatBot | None = None,
+        chatHistoryStore: ChatHistoryStore | None = None,
     ) -> None:
         self.chainId = chainId
         self.requester = requester
@@ -108,6 +116,8 @@ class AgentManager(Authorizer):
         self.deployerPrivateKey = deployerPrivateKey
         self.deployerAddress = Account.from_key(deployerPrivateKey).address if deployerPrivateKey else None
         self.deployerTransactionLock = asyncio.Lock()
+        self.chatBot = chatBot
+        self.chatHistoryStore = chatHistoryStore
         self._signatureSignerMap: dict[str, str] = {}
         self._positionsCache: dict[str, Position] = {}
         self._userConfigsCache: dict[str, UserConfig] = {}
@@ -773,13 +783,52 @@ class AgentManager(Authorizer):
             if messageText.startswith('/start'):
                 await self.telegramClient.send_message(
                     chatId=str(chatId),
-                    text='Welcome back! Your Telegram is already linked. You will receive notifications about your BorrowBot positions here.',
+                    text='Welcome back! Your Telegram is already linked. You can now chat with your BorrowBot agent here. Try asking "What\'s my position?" or "What are the current rates?"',
                 )
             else:
-                await self.telegramClient.send_message(
-                    chatId=str(chatId),
-                    text='BorrowBot is currently in notification-only mode. Check your positions at the web app.',
-                )
+                agents = await self.databaseStore.get_agents_by_user(userId=user.userId)
+                if not agents:
+                    await self.telegramClient.send_message(
+                        chatId=str(chatId),
+                        text="You don't have an agent yet. Please set up a position in the web app first.",
+                    )
+                    return
+                agent = agents[0]
+                userWallets = await self.databaseStore.get_user_wallets(userId=user.userId)
+                if not userWallets:
+                    await self.telegramClient.send_message(
+                        chatId=str(chatId),
+                        text='No wallet found for your account.',
+                    )
+                    return
+                walletAddress = userWallets[0].walletAddress
+                await self.telegramClient.send_message(chatId=str(chatId), text='Thinking...')
+                try:
+                    messages, _ = await self.send_chat_message(
+                        userAddress=walletAddress,
+                        agentId=agent.agentId,
+                        message=messageText,
+                        conversationId=f'telegram_{chatId}',
+                        channel='telegram',
+                    )
+                    agentMessages = [m for m in messages if not m.get('is_user', True)]
+                    if agentMessages:
+                        for msg in agentMessages:
+                            await self.telegramClient.send_message(
+                                chatId=str(chatId),
+                                text=str(msg.get('content', '')),
+                            )
+                    else:
+                        await self.telegramClient.send_message(
+                            chatId=str(chatId),
+                            text="I couldn't generate a response. Please try again.",
+                        )
+                except Exception as e:  # noqa: BLE001
+                    logging.error(f'Error processing Telegram chat message: {e}')
+                    await self.telegramClient.send_message(
+                        chatId=str(chatId),
+                        text='Sorry, I encountered an error processing your message. Please try again.',
+                    )
         except NotFoundException:
             await self.telegramClient.send_login_message(chatId=str(chatId), senderUsername=senderUsername)
 
@@ -833,3 +882,95 @@ class AgentManager(Authorizer):
         )
         transactions = self.ensClient.build_set_agent_config_transactions(agent.ensName, config)
         return transactions, agent.ensName
+
+    async def send_chat_message(
+        self,
+        userAddress: str,
+        agentId: str,
+        message: str,
+        conversationId: str | None = None,
+        channel: str = 'web',
+    ) -> tuple[list[dict[str, object]], str]:
+        """Send a message to the chat and get the agent's response."""
+        if self.chatBot is None:
+            raise BadRequestException(message='Chat functionality not configured')
+        normalizedAddress = chain_util.normalize_address(userAddress)
+        user = await self.databaseStore.get_user_by_wallet(walletAddress=normalizedAddress)
+        if user is None:
+            raise NotFoundException(message='User not found')
+        agent = await self.databaseStore.get_agent_by_id(agentId=agentId)
+        if agent is None or agent.userId != user.userId:
+            raise NotFoundException(message='Agent not found')
+        if conversationId is None:
+            conversationId = f'{channel}_{agentId}'
+        runtimeState = RuntimeState(
+            userId=user.userId,
+            agentId=agentId,
+            conversationId=conversationId,
+            walletAddress=normalizedAddress,
+            chainId=self.chainId,
+            agentManager=self,
+        )
+        systemPrompt = BORROWBOT_SYSTEM_PROMPT.format(agent_name=f'{agent.emoji} {agent.name}')
+        userPrompt = BORROWBOT_USER_PROMPT
+        if channel == 'telegram':
+            systemPrompt += TELEGRAM_FORMATTING_NOTE
+        messages: list[dict[str, object]] = []
+        async for event in self.chatBot.execute(
+            systemPrompt=systemPrompt,
+            userPromptTemplate=userPrompt,
+            runtimeState=runtimeState,
+            userMessage=message,
+        ):
+            if event.eventType in ('user', 'agent'):
+                content = event.content
+                text = content.get('text', '') if isinstance(content, dict) else str(content)
+                messages.append(
+                    {
+                        'message_id': event.chatEventId,
+                        'created_date': event.createdDate.isoformat(),
+                        'is_user': event.eventType == 'user',
+                        'content': text,
+                    }
+                )
+        return messages, conversationId
+
+    async def get_chat_history(
+        self,
+        userAddress: str,
+        agentId: str,
+        conversationId: str | None = None,
+        limit: int = 50,
+        channel: str = 'web',
+    ) -> tuple[list[dict[str, object]], str]:
+        """Get the chat history for an agent."""
+        if self.chatHistoryStore is None:
+            raise BadRequestException(message='Chat functionality not configured')
+        normalizedAddress = chain_util.normalize_address(userAddress)
+        user = await self.databaseStore.get_user_by_wallet(walletAddress=normalizedAddress)
+        if user is None:
+            raise NotFoundException(message='User not found')
+        agent = await self.databaseStore.get_agent_by_id(agentId=agentId)
+        if agent is None or agent.userId != user.userId:
+            raise NotFoundException(message='Agent not found')
+        if conversationId is None:
+            conversationId = f'{channel}_{agentId}'
+        events = await self.chatHistoryStore.get_user_agent_events(
+            userId=user.userId,
+            agentId=agentId,
+            conversationId=conversationId,
+            maxEvents=limit,
+        )
+        messages: list[dict[str, object]] = []
+        for event in events:
+            content = event.content
+            text = content.get('text', '') if isinstance(content, dict) else str(content)
+            messages.append(
+                {
+                    'message_id': event.chatEventId,
+                    'created_date': event.createdDate.isoformat(),
+                    'is_user': event.eventType == 'user',
+                    'content': text,
+                }
+            )
+        return messages, conversationId

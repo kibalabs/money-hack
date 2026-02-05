@@ -456,3 +456,67 @@ export class DeployAgentResponse extends ResponseData {
     );
   };
 }
+
+export class SendChatMessageRequest extends RequestData {
+  public constructor(
+    readonly message: string,
+    readonly conversationId: string | null,
+  ) {
+    super();
+  }
+
+  public toObject = (): RawObject => {
+    return {
+      message: this.message,
+      conversation_id: this.conversationId,
+    };
+  };
+}
+
+export class SendChatMessageResponse extends ResponseData {
+  public constructor(
+    readonly messages: Resources.ChatMessage[],
+    readonly conversationId: string,
+  ) {
+    super();
+  }
+
+  public static fromObject = (obj: RawObject): SendChatMessageResponse => {
+    return new SendChatMessageResponse(
+      (obj.messages as RawObject[]).map(Resources.ChatMessage.fromObject),
+      String(obj.conversation_id),
+    );
+  };
+}
+
+export class GetChatHistoryRequest extends RequestData {
+  public constructor(
+    readonly conversationId: string | null,
+    readonly limit: number,
+  ) {
+    super();
+  }
+
+  public toObject = (): RawObject => {
+    return {
+      conversation_id: this.conversationId,
+      limit: this.limit,
+    };
+  };
+}
+
+export class GetChatHistoryResponse extends ResponseData {
+  public constructor(
+    readonly messages: Resources.ChatMessage[],
+    readonly conversationId: string,
+  ) {
+    super();
+  }
+
+  public static fromObject = (obj: RawObject): GetChatHistoryResponse => {
+    return new GetChatHistoryResponse(
+      (obj.messages as RawObject[]).map(Resources.ChatMessage.fromObject),
+      String(obj.conversation_id),
+    );
+  };
+}

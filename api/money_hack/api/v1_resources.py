@@ -103,3 +103,19 @@ class Agent(BaseModel):
     wallet_address: str
     ens_name: str | None = None
     created_date: datetime
+
+
+class ChatMessage(BaseModel):
+    """A chat message in a conversation."""
+
+    message_id: int
+    created_date: datetime
+    is_user: bool
+    content: str
+
+
+class ChatResponse(BaseModel):
+    """Response from a chat message."""
+
+    messages: list[ChatMessage]
+    conversation_id: str
