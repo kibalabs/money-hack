@@ -158,4 +158,12 @@ export class MoneyHackClient extends ServiceClient {
     const response = await this.makeRequest(method, path, request, Endpoints.GetChatHistoryResponse, this.getHeaders(authToken));
     return new Resources.ChatResponse(response.messages, response.conversationId);
   };
+
+  public getAgentThoughts = async (agentId: string, limit: number, hoursBack: number, authToken: string): Promise<Resources.AgentAction[]> => {
+    const method = RestMethod.GET;
+    const path = `v1/agents/${agentId}/thoughts`;
+    const request = new Endpoints.GetAgentThoughtsRequest(limit, hoursBack);
+    const response = await this.makeRequest(method, path, request, Endpoints.GetAgentThoughtsResponse, this.getHeaders(authToken));
+    return response.actions;
+  };
 }

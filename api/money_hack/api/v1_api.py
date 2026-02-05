@@ -228,6 +228,17 @@ def create_v1_routes(agentManager: AgentManager) -> list[Route]:
         ]
         return endpoints.GetChatHistoryResponse(messages=messages, conversation_id=conversationId)
 
+    @json_route(requestType=endpoints.GetAgentThoughtsRequest, responseType=endpoints.GetAgentThoughtsResponse)
+    @authorize_signature(authorizer=agentManager)
+    async def get_agent_thoughts(request: KibaApiRequest[endpoints.GetAgentThoughtsRequest]) -> endpoints.GetAgentThoughtsResponse:
+        agentId = request.path_params.get('agentId', '')
+        thoughts = await agentManager.get_agent_thoughts(
+            agentId=agentId,
+            limit=request.data.limit,
+            hoursBack=request.data.hours_back,
+        )
+        return endpoints.GetAgentThoughtsResponse(actions=thoughts)
+
     return [
         Route('/v1/collaterals', endpoint=get_supported_collaterals, methods=['GET']),
         Route('/v1/market-data', endpoint=get_market_data, methods=['GET']),
@@ -250,4 +261,5 @@ def create_v1_routes(agentManager: AgentManager) -> list[Route]:
         Route('/v1/users/{userAddress:str}/ens/config-transactions', endpoint=get_ens_config_transactions, methods=['POST']),
         Route('/v1/users/{userAddress:str}/agents/{agentId:str}/chat', endpoint=send_chat_message, methods=['POST']),
         Route('/v1/users/{userAddress:str}/agents/{agentId:str}/chat/history', endpoint=get_chat_history, methods=['GET']),
+        Route('/v1/agents/{agentId:str}/thoughts', endpoint=get_agent_thoughts, methods=['GET']),
     ]

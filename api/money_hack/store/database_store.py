@@ -1,6 +1,8 @@
 from core.exceptions import NotFoundException
 from core.store.database import Database
+from core.store.retriever import Direction
 from core.store.retriever import FieldFilter
+from core.store.retriever import Order
 from core.store.retriever import StringFieldFilter
 from core.util import chain_util
 
@@ -294,4 +296,24 @@ class DatabaseStore:
                 StringFieldFilter(fieldName='conversationId', eq=f'telegram_secret:{secretCode}'),
                 StringFieldFilter(fieldName='eventType', eq='telegram_auth_pending'),
             ],
+        )
+
+    async def log_agent_thought(self, agentId: str, thoughtType: str, value: str, details: dict[str, object]) -> AgentAction:
+        """Log an agent thought as an action."""
+        return await AgentActionsRepository.create(
+            database=self.database,
+            agentId=agentId,
+            actionType=thoughtType,
+            value=value,
+            valueId=None,
+            details=details,
+        )
+
+    async def get_agent_thoughts(self, agentId: str, limit: int = 100, hoursBack: int = 24) -> list[AgentAction]:  # noqa: ARG002
+        """Get recent agent thoughts (actions with content)."""
+        return await AgentActionsRepository.list_many(
+            database=self.database,
+            fieldFilters=[UUIDFieldFilter(fieldName='agentId', eq=agentId)],
+            orders=[Order(fieldName='createdDate', direction=Direction.DESCENDING)],
+            limit=limit,
         )

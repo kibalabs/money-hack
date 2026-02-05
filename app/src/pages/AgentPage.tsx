@@ -5,7 +5,8 @@ import { Alignment, Box, Button, Direction, PaddingSize, Stack, Text } from '@ki
 import { useToastManager } from '@kibalabs/ui-react-toast';
 
 import { useAuth } from '../AuthContext';
-import { Agent, ChatMessage, MarketData, Position } from '../client/resources';
+import { Agent, AgentAction, ChatMessage, MarketData, Position } from '../client/resources';
+import { AgentTerminal } from '../components/AgentTerminal';
 import { FloatingChat } from '../components/FloatingChat';
 import { PositionDashboard } from '../components/PositionDashboard';
 import { useGlobals } from '../GlobalsContext';
@@ -19,7 +20,9 @@ export function AgentPage(): React.ReactElement {
   const [position, setPosition] = React.useState<Position | null>(null);
   const [marketData, setMarketData] = React.useState<MarketData | null>(null);
   const [agent, setAgent] = React.useState<Agent | null>(null);
+  const [agentActions, setAgentActions] = React.useState<AgentAction[]>([]);
   const [isLoading, setIsLoading] = React.useState<boolean>(true);
+  const [isLoadingActions, setIsLoadingActions] = React.useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = React.useState<boolean>(false);
   const hasLoadedRef = React.useRef<boolean>(false);
   const [conversationId, setConversationId] = useLocalStorageState(`borrowbot-${accountAddress || 'default'}-conversationId`, localStorageClient);
@@ -60,6 +63,23 @@ export function AgentPage(): React.ReactElement {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accountAddress, authToken, moneyHackClient]);
 
+  const loadAgentActions = React.useCallback(async (showLoading: boolean = true): Promise<void> => {
+    if (!agent || !authToken) return;
+    if (showLoading) {
+      setIsLoadingActions(true);
+    }
+    try {
+      const actions = await moneyHackClient.getAgentThoughts(agent.agentId, 100, 24, authToken);
+      setAgentActions(actions);
+    } catch (error) {
+      console.error('Failed to load agent actions:', error);
+    } finally {
+      if (showLoading) {
+        setIsLoadingActions(false);
+      }
+    }
+  }, [agent, authToken, moneyHackClient]);
+
   React.useEffect(() => {
     if (!isWeb3AccountLoggedIn) {
       navigator.navigateTo('/');
@@ -70,6 +90,18 @@ export function AgentPage(): React.ReactElement {
     loadData();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isWeb3AccountLoggedIn]);
+
+  // Load agent actions initially and poll every 10 seconds
+  React.useEffect(() => {
+    if (!agent) return undefined;
+    loadAgentActions(true); // Show loading on initial load
+    const intervalId = setInterval(() => {
+      loadAgentActions(false); // Don't show loading on background polls
+    }, 10000); // Poll every 10 seconds
+    return (): void => {
+      clearInterval(intervalId);
+    };
+  }, [agent, loadAgentActions]);
 
   const handleRefreshClicked = React.useCallback((): void => {
     loadData(false);
@@ -151,6 +183,14 @@ export function AgentPage(): React.ReactElement {
         onClosePositionClicked={handleClosePositionClicked}
         isRefreshing={isRefreshing}
       />
+
+      <Box maxWidth='600px' isFullWidth={true} style={{ marginTop: '32px' }}>
+        <AgentTerminal
+          agent={agent}
+          actions={agentActions}
+          isLoading={isLoadingActions}
+        />
+      </Box>
 
       <Box maxWidth='600px' isFullWidth={true}>
         <Stack direction={Direction.Vertical} shouldAddGutters={true} childAlignment={Alignment.Center}>

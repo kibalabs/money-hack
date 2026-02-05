@@ -32,6 +32,7 @@ from money_hack.agent.constants import TELEGRAM_FORMATTING_NOTE
 from money_hack.agent.runtime_state import RuntimeState
 from money_hack.api.authorizer import Authorizer
 from money_hack.api.v1_resources import Agent as AgentResource
+from money_hack.api.v1_resources import AgentActionResource
 from money_hack.api.v1_resources import AssetBalance
 from money_hack.api.v1_resources import AuthToken
 from money_hack.api.v1_resources import ClosePositionTransactionsData
@@ -1086,3 +1087,27 @@ class AgentManager(Authorizer):  # Core manager
                 }
             )
         return messages, conversationId
+
+    async def get_agent_thoughts(
+        self,
+        agentId: str,
+        limit: int = 100,
+        hoursBack: int = 24,
+    ) -> list[AgentActionResource]:
+        """Get the agent's recent thoughts."""
+        thoughts = await self.databaseStore.get_agent_thoughts(
+            agentId=agentId,
+            limit=limit,
+            hoursBack=hoursBack,
+        )
+        return [
+            AgentActionResource(
+                action_id=thought.agentActionId,
+                created_date=thought.createdDate,
+                agent_id=thought.agentId,
+                action_type=thought.actionType,
+                value=thought.value,
+                details=typing.cast('dict[str, object]', thought.details),
+            )
+            for thought in thoughts
+        ]

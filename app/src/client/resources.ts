@@ -275,3 +275,25 @@ export class ChatResponse {
     );
   };
 }
+
+export class AgentAction {
+  public constructor(
+    readonly actionId: number,
+    readonly createdDate: Date,
+    readonly agentId: string,
+    readonly actionType: string,
+    readonly value: string,
+    readonly details: Record<string, unknown>,
+  ) { }
+
+  public static fromObject = (obj: RawObject): AgentAction => {
+    return new AgentAction(
+      Number(obj.action_id),
+      dateFromString(String(obj.created_date)),
+      String(obj.agent_id),
+      String(obj.action_type),
+      String(obj.value),
+      obj.details as Record<string, unknown>,
+    );
+  };
+}

@@ -520,3 +520,33 @@ export class GetChatHistoryResponse extends ResponseData {
     );
   };
 }
+
+export class GetAgentThoughtsRequest extends RequestData {
+  public constructor(
+    readonly limit: number,
+    readonly hoursBack: number,
+  ) {
+    super();
+  }
+
+  public toObject = (): RawObject => {
+    return {
+      limit: this.limit,
+      hours_back: this.hoursBack,
+    };
+  };
+}
+
+export class GetAgentThoughtsResponse extends ResponseData {
+  public constructor(
+    readonly actions: Resources.AgentAction[],
+  ) {
+    super();
+  }
+
+  public static fromObject = (obj: RawObject): GetAgentThoughtsResponse => {
+    return new GetAgentThoughtsResponse(
+      (obj.actions as RawObject[]).map(Resources.AgentAction.fromObject),
+    );
+  };
+}

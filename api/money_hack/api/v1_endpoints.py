@@ -210,3 +210,12 @@ class GetChatHistoryRequest(BaseModel):
 class GetChatHistoryResponse(BaseModel):
     messages: list[resources.ChatMessage]
     conversation_id: str
+
+
+class GetAgentThoughtsRequest(BaseModel):
+    limit: int = 100
+    hours_back: int = 24
+
+
+class GetAgentThoughtsResponse(BaseModel):
+    actions: list[resources.AgentActionResource]

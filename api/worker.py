@@ -21,11 +21,13 @@ logging.init_external_loggers(loggerNames=['httpx'])
 
 async def main() -> None:
     agentManager = create_agent_manager()
+    await agentManager.databaseStore.database.connect(poolSize=2)
     logging.info('Worker started, beginning AgentManager monitoring loop...')
     try:
         await agentManager.monitor_positions_loop()
     finally:
         await agentManager.requester.close_connections()
+        await agentManager.databaseStore.database.disconnect()
 
 
 if __name__ == '__main__':

@@ -119,3 +119,14 @@ class ChatResponse(BaseModel):
 
     messages: list[ChatMessage]
     conversation_id: str
+
+
+class AgentActionResource(BaseModel):
+    """An agent action or thought."""
+
+    action_id: int
+    created_date: datetime
+    agent_id: str
+    action_type: str
+    value: str
+    details: dict[str, object]
