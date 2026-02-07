@@ -337,3 +337,31 @@ export class AgentAction {
     );
   };
 }
+
+export class EnsConstitution {
+  public constructor(
+    readonly ensName: string | null,
+    readonly maxLtv: number | null,
+    readonly minSpread: number | null,
+    readonly maxPositionUsd: number | null,
+    readonly allowedCollateral: string | null,
+    readonly pause: boolean,
+    readonly status: string | null,
+    readonly lastAction: string | null,
+    readonly lastCheck: string | null,
+  ) { }
+
+  public static fromObject = (obj: RawObject): EnsConstitution => {
+    return new EnsConstitution(
+      obj.ens_name ? String(obj.ens_name) : null,
+      obj.max_ltv != null ? Number(obj.max_ltv) : null,
+      obj.min_spread != null ? Number(obj.min_spread) : null,
+      obj.max_position_usd != null ? Number(obj.max_position_usd) : null,
+      obj.allowed_collateral ? String(obj.allowed_collateral) : null,
+      Boolean(obj.pause),
+      obj.status ? String(obj.status) : null,
+      obj.last_action ? String(obj.last_action) : null,
+      obj.last_check ? String(obj.last_check) : null,
+    );
+  };
+}

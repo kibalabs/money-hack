@@ -17,12 +17,12 @@ from money_hack.agent.tools import GetMarketDataTool
 from money_hack.agent.tools import GetPositionTool
 from money_hack.agent.tools import GetPriceAnalysisTool
 from money_hack.agent.tools import SetTargetLtvTool
-from money_hack.blockchain_data.price_intelligence_service import PriceIntelligenceService
 from money_hack.agent_manager import AgentManager
 from money_hack.blockchain_data.alchemy_client import AlchemyClient
 from money_hack.blockchain_data.blockscout_client import BlockscoutClient
 from money_hack.blockchain_data.findblock_client import FindBlockClient
 from money_hack.blockchain_data.moralis_client import MoralisClient
+from money_hack.blockchain_data.price_intelligence_service import PriceIntelligenceService
 from money_hack.external.coinbase_cdp_client import CoinbaseCdpClient
 from money_hack.external.ens_client import EnsClient
 from money_hack.external.telegram_client import TelegramClient
@@ -43,6 +43,7 @@ CDP_API_KEY_PRIVATE_KEY = os.environ['CDP_API_KEY_PRIVATE_KEY']
 DEPLOYER_PRIVATE_KEY = os.environ['DEPLOYER_PRIVATE_KEY']
 MORALIS_API_KEY = os.environ['MORALIS_API_KEY']
 ALCHEMY_API_KEY = os.environ['ALCHEMY_API_KEY']
+MAINNET_RPC_URL = os.environ.get('MAINNET_RPC_URL', f'https://eth-mainnet.g.alchemy.com/v2/{ALCHEMY_API_KEY}')
 BLOCKSCOUT_API_KEY = os.environ['BLOCKSCOUT_API_KEY']
 TELEGRAM_API_TOKEN = os.environ['TELEGRAM_API_TOKEN']
 GEMINI_API_KEY = os.environ['GEMINI_API_KEY']
@@ -59,6 +60,7 @@ def create_agent_manager() -> AgentManager:
     requester = Requester()
     cache = FileCache(cacheDirectory='./data/cache')
     ethClient = RestEthClient(url=BASE_RPC_URL, chainId=BASE_CHAIN_ID, requester=requester)
+    mainnetEthClient = RestEthClient(url=MAINNET_RPC_URL, chainId=1, requester=requester)
     paymasterEthClient = RestEthClient(url=BASE_PAYMASTER_RPC_URL, chainId=BASE_CHAIN_ID, requester=requester) if BASE_PAYMASTER_RPC_URL else None
     moralisClient = MoralisClient(requester=requester, apiKey=MORALIS_API_KEY, cache=cache)
     findBlockClient = FindBlockClient(requester=requester, cache=cache)
@@ -73,7 +75,7 @@ def create_agent_manager() -> AgentManager:
         redirectUri=f'{API_URL}/v1/telegram-oauth-callback',
         origin=APP_URL,
     )
-    ensClient = EnsClient(requester=requester, chainId=BASE_CHAIN_ID)
+    ensClient = EnsClient(requester=requester, chainId=1)
     coinbaseCdpClient = (
         CoinbaseCdpClient(
             requester=requester,
@@ -143,5 +145,6 @@ def create_agent_manager() -> AgentManager:
         ltvManager=ltvManager,
         notificationService=notificationService,
         priceIntelligenceService=priceIntelligenceService,
+        mainnetEthClient=mainnetEthClient,
     )
     return agentManager

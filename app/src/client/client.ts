@@ -174,4 +174,20 @@ export class MoneyHackClient extends ServiceClient {
     const response = await this.makeRequest(method, path, request, Endpoints.GetAgentThoughtsResponse, this.getHeaders(authToken));
     return response.actions;
   };
+
+  public getEnsConstitution = async (userAddress: string, authToken: string): Promise<Resources.EnsConstitution> => {
+    const method = RestMethod.GET;
+    const path = `v1/users/${userAddress}/ens/constitution`;
+    const request = new Endpoints.GetEnsConstitutionRequest();
+    const response = await this.makeRequest(method, path, request, Endpoints.GetEnsConstitutionResponse, this.getHeaders(authToken));
+    return response.constitution;
+  };
+
+  public setEnsConstitution = async (userAddress: string, maxLtv: number | null, minSpread: number | null, maxPositionUsd: number | null, allowedCollateral: string | null, pause: boolean, authToken: string): Promise<Resources.EnsConstitution> => {
+    const method = RestMethod.POST;
+    const path = `v1/users/${userAddress}/ens/constitution`;
+    const request = new Endpoints.SetEnsConstitutionRequest(maxLtv, minSpread, maxPositionUsd, allowedCollateral, pause);
+    const response = await this.makeRequest(method, path, request, Endpoints.SetEnsConstitutionResponse, this.getHeaders(authToken));
+    return response.constitution;
+  };
 }

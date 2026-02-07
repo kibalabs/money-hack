@@ -50,6 +50,7 @@ async def main() -> None:
     databaseConnectionString = f'postgresql+asyncpg://{DB_USERNAME}:{encodedPassword}@{DB_HOST}:{DB_PORT}/{DB_NAME}'
 
     from core.store.database import Database
+
     database = Database(connectionString=databaseConnectionString)
 
     try:
@@ -90,14 +91,14 @@ async def main() -> None:
                 collateralSymbol = 'cbBTC' if collateralAsset.lower() == CBBTC_ADDRESS.lower() else 'WETH'
                 collateralDecimals = 8 if collateralSymbol == 'cbBTC' else 18
 
-                print(f'\n{"="*80}')
+                print(f'\n{"=" * 80}')
                 print(f'Agent: {agentName} (ID: {agentId})')
                 print(f'Wallet: {walletAddress}')
                 print(f'Position ID: {positionId} | Status: {status}')
                 print(f'Collateral: {collateralSymbol} ({collateralAsset})')
                 print(f'Target LTV: {targetLtv:.2%}')
                 print(f'Morpho Market ID: {morphoMarketId}')
-                print(f'{"="*80}')
+                print(f'{"=" * 80}')
 
                 # 1. Wallet balances (ERC20 balanceOf)
                 print(f'\n--- WALLET BALANCES ---')

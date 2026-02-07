@@ -51,6 +51,7 @@ from money_hack.blockchain_data.price_intelligence_service import PriceIntellige
 from money_hack.external.coinbase_cdp_client import CoinbaseCdpClient
 from money_hack.external.ens_client import EnsAgentConfig
 from money_hack.external.ens_client import EnsClient
+from money_hack.external.ens_client import EnsConstitution
 from money_hack.external.telegram_client import TelegramClient
 from money_hack.forty_acres.forty_acres_client import FortyAcresClient
 from money_hack.morpho import morpho_abis
@@ -120,10 +121,12 @@ class AgentManager(Authorizer):  # Core manager
         ltvManager: LtvManager | None = None,
         notificationService: NotificationService | None = None,
         priceIntelligenceService: 'PriceIntelligenceService | None' = None,
+        mainnetEthClient: RestEthClient | None = None,
     ) -> None:
         self.chainId = chainId
         self.requester = requester
         self.ethClient = ethClient
+        self.mainnetEthClient = mainnetEthClient
         self.moralisClient = moralisClient
         self.alchemyClient = alchemyClient
         self.morphoClient = morphoClient
@@ -286,6 +289,7 @@ class AgentManager(Authorizer):  # Core manager
         agent = await self.databaseStore.get_agent_by_id(agentId=agent_id)
         if agent is None or agent.userId != user.userId:
             raise KibaException('Agent not found')
+        # ENS subname registration happens on mainnet via scripts/set_ens_constitution.py
         collateral = next((c for c in SUPPORTED_COLLATERALS if c.address.lower() == collateral_asset_address.lower()), SUPPORTED_COLLATERALS[0])
         try:
             priceUsd = await self._get_asset_price(assetAddress=collateral_asset_address)
@@ -451,6 +455,18 @@ class AgentManager(Authorizer):  # Core manager
                 agent = await self.databaseStore.get_agent(agentId=position.agentId)
                 if not agent:
                     continue
+                # Read ENS constitution if agent has a name
+                constitution: EnsConstitution | None = None
+                if agent.ensName and self.mainnetEthClient:
+                    try:
+                        constitution = await self.ensClient.read_constitution(ethClient=self.mainnetEthClient, ensName=agent.ensName)
+                        logging.info(f'Read ENS constitution for {agent.ensName}: pause={constitution.pause}, max_ltv={constitution.max_ltv}')
+                    except Exception:  # noqa: BLE001
+                        logging.exception(f'Failed to read ENS constitution for {agent.ensName}')
+                # Emergency kill switch
+                if constitution and constitution.pause:
+                    logging.info(f'Agent {agent.ensName} is PAUSED by ENS constitution. Skipping all actions.')
+                    continue
                 # Fetch live on-chain values
                 onchainCollateral, onchainBorrow = await self._get_onchain_position(
                     agentWalletAddress=agent.walletAddress,
@@ -465,6 +481,28 @@ class AgentManager(Authorizer):  # Core manager
                     onchainVaultAssets=onchainVaultAssets,
                 )
                 await self.ltvManager.log_ltv_check(result)
+                # Apply ENS constitution overrides
+                if constitution and constitution.max_ltv is not None and result.current_ltv > constitution.max_ltv and not (result.needs_action and result.action_type == 'auto_repay'):
+                    logging.info(f'ENS constitution max-ltv {constitution.max_ltv:.2%} exceeded (current {result.current_ltv:.2%}), forcing repay')
+                    collateralPriceUsd = (await self.alchemyClient.get_asset_current_price(chainId=self.chainId, assetAddress=position.collateralAsset)).priceUsd
+                    collateralValueUsd = (onchainCollateral / (10**collateralDecimals)) * collateralPriceUsd
+                    repayUsd = (result.current_ltv - constitution.max_ltv) * collateralValueUsd
+                    result.needs_action = True
+                    result.action_type = 'auto_repay'
+                    result.action_amount = int(repayUsd * 1e6)
+                    result.reason = f'ENS constitution max-ltv {constitution.max_ltv:.2%} exceeded'
+                if constitution and constitution.min_spread is not None and result.needs_action and result.action_type == 'auto_optimize':
+                    marketData = await self.morphoClient.get_market(chain_id=self.chainId, collateral_address=position.collateralAsset)
+                    borrowApy = marketData.borrow_apy if marketData else 0
+                    vaultInfo = await self.fortyAcresClient.get_vault_info(chainId=self.chainId) if self.fortyAcresClient else None
+                    yieldApy = vaultInfo.apy if vaultInfo else 0
+                    spread = yieldApy - borrowApy
+                    if spread < constitution.min_spread:
+                        logging.info(f'ENS constitution min-spread {constitution.min_spread:.4f} not met (spread={spread:.4f}), suppressing optimization')
+                        result.needs_action = False
+                        result.action_type = None
+                        result.action_amount = None
+                        result.reason = f'Spread {spread:.4f} below ENS constitution min-spread {constitution.min_spread:.4f}'
                 user = await self.databaseStore.get_user(userId=agent.userId)
                 if not user:
                     continue
@@ -618,6 +656,8 @@ class AgentManager(Authorizer):  # Core manager
                         collateralValue=collateralValue,
                         debtValue=debtValue,
                     )
+                # ENS status writes are on mainnet — too expensive for every check cycle.
+                # Status is written via scripts/set_ens_constitution.py when needed.
             except Exception:  # noqa: BLE001
                 logging.exception(f'Error checking position {position.agentPositionId}')
 
@@ -818,6 +858,7 @@ class AgentManager(Authorizer):  # Core manager
         Returns: (collateral_amount_raw, borrow_amount_raw_usdc)
         """
         from money_hack.morpho.transaction_builder import MORPHO_BLUE_ADDRESS
+
         marketIdBytes = bytes.fromhex(morphoMarketId[2:]) if morphoMarketId.startswith('0x') else bytes.fromhex(morphoMarketId)
         # Fetch user position: (supplyShares, borrowShares, collateral)
         positionResponse = await self.ethClient.call_function_by_name(
@@ -1266,6 +1307,69 @@ class AgentManager(Authorizer):  # Core manager
         )
         transactions = self.ensClient.build_set_agent_config_transactions(agent.ensName, config)
         return transactions, agent.ensName
+
+    async def get_ens_constitution(self, userAddress: str) -> dict[str, object]:
+        """Read the full ENS constitution + status for an agent."""
+        normalizedAddress = chain_util.normalize_address(userAddress)
+        user = await self.databaseStore.get_user_by_wallet(walletAddress=normalizedAddress)
+        if user is None:
+            raise NotFoundException(message='User not found')
+        agents = await self.databaseStore.get_agents_by_user(userId=user.userId)
+        if not agents:
+            raise NotFoundException(message='No agents found for user')
+        agent = agents[0]
+        if not agent.ensName:
+            return {'ens_name': None, 'max_ltv': None, 'min_spread': None, 'max_position_usd': None, 'allowed_collateral': None, 'pause': False, 'status': None, 'last_action': None, 'last_check': None}
+        if not self.mainnetEthClient:
+            raise BadRequestException(message='Mainnet ETH client not configured for ENS reads')
+        constitution = await self.ensClient.read_constitution(ethClient=self.mainnetEthClient, ensName=agent.ensName)
+        status = await self.ensClient.read_status(ethClient=self.mainnetEthClient, ensName=agent.ensName)
+        return {
+            'ens_name': agent.ensName,
+            'max_ltv': constitution.max_ltv,
+            'min_spread': constitution.min_spread,
+            'max_position_usd': constitution.max_position_usd,
+            'allowed_collateral': constitution.allowed_collateral,
+            'pause': constitution.pause,
+            'status': status.status,
+            'last_action': status.last_action,
+            'last_check': status.last_check,
+        }
+
+    async def set_ens_constitution(self, userAddress: str, maxLtv: float | None, minSpread: float | None, maxPositionUsd: float | None, allowedCollateral: str | None, pause: bool) -> dict[str, object]:
+        """Set the ENS constitution for an agent via mainnet deployer multicall."""
+        normalizedAddress = chain_util.normalize_address(userAddress)
+        user = await self.databaseStore.get_user_by_wallet(walletAddress=normalizedAddress)
+        if user is None:
+            raise NotFoundException(message='User not found')
+        agents = await self.databaseStore.get_agents_by_user(userId=user.userId)
+        if not agents:
+            raise NotFoundException(message='No agents found for user')
+        agent = agents[0]
+        if not agent.ensName:
+            raise BadRequestException(message='Agent does not have an ENS name')
+        if not self.mainnetEthClient or not self.deployerPrivateKey:
+            raise BadRequestException(message='Mainnet ETH client or deployer not configured')
+        constitution = EnsConstitution(
+            max_ltv=maxLtv,
+            min_spread=minSpread,
+            max_position_usd=maxPositionUsd,
+            allowed_collateral=allowedCollateral,
+            pause=pause,
+        )
+        multicallTx = self.ensClient.build_constitution_multicall(agent.ensName, constitution)
+        deployerAddress = Account.from_key(self.deployerPrivateKey).address
+        txParams: TxParams = {
+            'to': Web3.to_checksum_address(multicallTx.to),
+            'data': HexBytes(multicallTx.data),
+            'value': Web3.to_wei(0, 'ether'),
+        }
+        filledParams = await self.mainnetEthClient.fill_transaction_params(params=txParams, fromAddress=deployerAddress)
+        signed = Web3().eth.account.sign_transaction(transaction_dict=filledParams, private_key=self.deployerPrivateKey)
+        txHash = await self.mainnetEthClient.send_raw_transaction(transactionData=signed.raw_transaction.hex())
+        await self.mainnetEthClient.wait_for_transaction_receipt(transactionHash=txHash)
+        logging.info(f'Set ENS constitution for {agent.ensName}: max_ltv={maxLtv}, pause={pause} (tx: {txHash})')
+        return await self.get_ens_constitution(userAddress=userAddress)
 
     async def send_chat_message(
         self,

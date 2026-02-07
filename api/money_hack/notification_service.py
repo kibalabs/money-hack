@@ -155,11 +155,7 @@ class NotificationService:
         """Send notification when auto-optimization (yield looping) is executed."""
         if not user.telegramChatId:
             return False
-        message = (
-            f'Market conditions are favorable, so I borrowed an additional ${borrowAmount:.2f} USDC '
-            f'and deposited it into the yield vault to maximize your earnings. '
-            f'LTV moved from {oldLtv:.1%} to {newLtv:.1%}.'
-        )
+        message = f'Market conditions are favorable, so I borrowed an additional ${borrowAmount:.2f} USDC and deposited it into the yield vault to maximize your earnings. LTV moved from {oldLtv:.1%} to {newLtv:.1%}.'
         if priceContext:
             message += f'\n\nMarket: {priceContext}'
         success = await self.telegramClient.send_message(chatId=user.telegramChatId, text=message)

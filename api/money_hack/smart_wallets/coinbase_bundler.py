@@ -25,6 +25,9 @@ WHITELISTED_ADDRESSES = {
     '0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb',  # Morpho Blue
     # Vaults
     '0x0000000f2eB9f69274678c76222B35eEc7588a65',  # Yo USDC Vault (40acres)
+    # ENS (mainnet)
+    '0x231b0Ee14048e9dCcD1d247744d114a4EB5E8E63',  # ENS Public Resolver (text records + multicall)
+    '0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e',  # ENS Registry (subname registration)
 }
 
 

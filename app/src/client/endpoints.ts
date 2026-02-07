@@ -578,3 +578,63 @@ export class GetAgentThoughtsResponse extends ResponseData {
     );
   };
 }
+
+export class GetEnsConstitutionRequest extends RequestData {
+  public constructor() {
+    super();
+  }
+
+  public toObject = (): RawObject => {
+    return {};
+  };
+}
+
+export class GetEnsConstitutionResponse extends ResponseData {
+  public constructor(
+    readonly constitution: Resources.EnsConstitution,
+  ) {
+    super();
+  }
+
+  public static fromObject = (obj: RawObject): GetEnsConstitutionResponse => {
+    return new GetEnsConstitutionResponse(
+      Resources.EnsConstitution.fromObject(obj.constitution as RawObject),
+    );
+  };
+}
+
+export class SetEnsConstitutionRequest extends RequestData {
+  public constructor(
+    readonly maxLtv: number | null,
+    readonly minSpread: number | null,
+    readonly maxPositionUsd: number | null,
+    readonly allowedCollateral: string | null,
+    readonly pause: boolean,
+  ) {
+    super();
+  }
+
+  public toObject = (): RawObject => {
+    return {
+      max_ltv: this.maxLtv,
+      min_spread: this.minSpread,
+      max_position_usd: this.maxPositionUsd,
+      allowed_collateral: this.allowedCollateral,
+      pause: this.pause,
+    };
+  };
+}
+
+export class SetEnsConstitutionResponse extends ResponseData {
+  public constructor(
+    readonly constitution: Resources.EnsConstitution,
+  ) {
+    super();
+  }
+
+  public static fromObject = (obj: RawObject): SetEnsConstitutionResponse => {
+    return new SetEnsConstitutionResponse(
+      Resources.EnsConstitution.fromObject(obj.constitution as RawObject),
+    );
+  };
+}

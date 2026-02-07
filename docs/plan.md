@@ -86,56 +86,19 @@ BorrowBot is an autonomous agent on **Base** that manages overcollateralized loa
 
 * **Goal**: Allow users to withdraw earned USDC from the vault while maintaining position safety.
 
-### 🔲 Phase 16: Auto-Optimizer (Yield Maximizer)
+### ✅ Phase 16: Auto-Optimizer (Yield Maximizer)
 
-* **Goal**: Safely increase leverage when LTV is low to maximize capital efficiency ("Looping").
+* **Outcome**: Agent safely increases leverage when LTV is low to maximize capital efficiency. Profitability gates ensure optimization only runs when yield spread is positive. Auto-deploys idle wallet assets (collateral and USDC) into the position.
 
-#### Implementation
-- **Trigger**: In `LtvManager.check_position_ltv()`, when `currentLtv < targetLtv - 0.05` (existing auto_borrow), add profitability & volatility gates before executing.
-- **Profitability gate**: Fetch yield APY and borrow APY, only optimize if `spread > 0` and projected annual gain > $100.
-- **Volatility gate**: Use `PriceIntelligenceService` (Phase 16B) — suppress if 1h price change > 2% or 24h volatility (stddev) is elevated.
-- **Always on**: No user toggle — optimization runs automatically for all positions when conditions are met.
-- **Execution**: Reuses existing `build_auto_borrow_transactions()` — no new on-chain logic needed.
-- **Notification**: `send_auto_optimize_success()` — includes borrow amount, new LTV, estimated extra yield/year, and price context.
+### ✅ Phase 17: On-Chain Position Truth (Remove Stored Holdings)
+
+* **Outcome**: All position values (collateral, borrow, vault, wallet balances) are fetched live from on-chain. Dropped `collateralAmount`, `borrowAmount`, and `vaultShares` columns from the DB. Dashboard redesigned to show net position value, idle wallet assets, assets vs debt breakdown, and close-position cost.
 
 ---
 
-### 🔲 Phase 16B: Historical Price Intelligence
+### ✅ Phase 18: ENS as the Agent's On-Chain Constitution
 
-* **Goal**: Give the agent historical price data to improve rebalancing and optimization decisions.
-
-#### Implementation
-- **Data source**: Alchemy Historical Prices API (already integrated in `AlchemyClient`) — no new API keys or subgraph needed.
-- **New service**: `PriceIntelligenceService` in `blockchain_data/price_intelligence_service.py`.
-  - `get_price_analysis(chainId, assetAddress)` → `PriceAnalysis` dataclass with: current price, 1h/24h/7d change %, 24h volatility (stddev of hourly samples), trend direction.
-  - Uses Alchemy `tokens/historical` endpoint with hourly intervals for 24h and daily intervals for 7d.
-  - In-memory cache (15 min TTL) to avoid repeated API calls.
-- **New AI tool**: `GetPriceAnalysisTool` — agent can call `get_price_analysis(asset)` to get a structured price summary for chat responses.
-- **Integration**: `LtvManager` receives `PriceIntelligenceService` and calls it during auto-optimize checks. Notifications include price context.
-
----
-
-### 🔲 Phase 17: On-Chain Position Truth (Remove Stored Holdings)
-
-* **Goal**: Always show live on-chain values for collateral, borrow, and vault balances — never rely on stale DB values.
-
-#### Problem
-`collateralAmount`, `borrowAmount`, and `vaultShares` are stored in `tbl_agent_positions` at creation/transaction time and only partially updated. When a user deposits collateral directly to the agent or external state changes occur (partial liquidation, interest accrual), the UI shows stale values.
-
-#### Implementation
-- **On-chain fetch**: Call Morpho Blue's `position(marketId, agentWallet)` contract function (already in `MORPHO_BLUE_ABI` but never called) to get live `collateral` and `borrowShares`. Call the vault's `balanceOf` + `convertToAssets` for live vault balance (already partially done via `_get_actual_vault_balance`).
-- **Remove stored holdings**: Drop `collateralAmount`, `borrowAmount`, and `vaultShares` columns from `tbl_agent_positions`. Keep only: `agentId`, `collateralAsset`, `targetLtv`, `morphoMarketId`, `status`, timestamps.
-- **New method**: Add `get_onchain_position(agentWallet, marketId)` to fetch collateral amount, borrow shares, and convert borrow shares to USDC amount using Morpho's `market()` function for the interest index.
-- **Update `get_position()`**: Replace DB reads of collateral/borrow/vault with on-chain calls. Cache result briefly (e.g., 30s) to avoid redundant RPC calls.
-- **Update `LtvManager`**: Use on-chain values for LTV calculation and rebalancing decisions instead of DB values.
-- **Update transaction flows**: After deposit/borrow/repay/withdraw, no longer need to update holdings in DB — just invalidate cache.
-- **Migration**: Alembic migration to drop the three columns.
-
----
-
-### 🔲 Phase 18: ENS Basescan Labels
-
-* **Goal**: Configure reverse resolution so agent wallets display their ENS name on block explorers.
+* **Outcome**: ENS text records on Base L2 (Basenames) serve as a decentralized governance layer. Owners set guardrails (`com.borrowbot.max-ltv`, `com.borrowbot.min-spread`, `com.borrowbot.pause`, etc.) via ENS, and the agent reads its constitution before every action cycle. The agent writes status back (`com.borrowbot.status`, `com.borrowbot.last-action`, `com.borrowbot.last-check`). Fixed critical `namehash()` bug (was NIST SHA-3, now keccak256). Frontend constitution panel on AgentPage. Targets ETHGlobal "Most Creative Use of ENS for DeFi" prize.
 
 ### 🔲 Phase 19: Uniswap Integration
 

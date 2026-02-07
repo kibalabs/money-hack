@@ -8,6 +8,7 @@ from money_hack.agent_manager import AgentManager
 from money_hack.api import v1_endpoints as endpoints
 from money_hack.api.authorizer import authorize_signature
 from money_hack.api.v1_resources import ChatMessage
+from money_hack.api.v1_resources import EnsConstitutionResource
 
 
 def create_v1_routes(agentManager: AgentManager) -> list[Route]:
@@ -189,6 +190,27 @@ def create_v1_routes(agentManager: AgentManager) -> list[Route]:
         )
         return endpoints.GetEnsConfigTransactionsResponse(transactions=transactions, ens_name=ensName)
 
+    @json_route(requestType=endpoints.GetEnsConstitutionRequest, responseType=endpoints.GetEnsConstitutionResponse)
+    @authorize_signature(authorizer=agentManager)
+    async def get_ens_constitution(request: KibaApiRequest[endpoints.GetEnsConstitutionRequest]) -> endpoints.GetEnsConstitutionResponse:
+        userAddress = request.path_params.get('userAddress', '')
+        data = await agentManager.get_ens_constitution(userAddress=userAddress)
+        return endpoints.GetEnsConstitutionResponse(constitution=EnsConstitutionResource.model_validate(data))
+
+    @json_route(requestType=endpoints.SetEnsConstitutionRequest, responseType=endpoints.SetEnsConstitutionResponse)
+    @authorize_signature(authorizer=agentManager)
+    async def set_ens_constitution(request: KibaApiRequest[endpoints.SetEnsConstitutionRequest]) -> endpoints.SetEnsConstitutionResponse:
+        userAddress = request.path_params.get('userAddress', '')
+        data = await agentManager.set_ens_constitution(
+            userAddress=userAddress,
+            maxLtv=request.data.max_ltv,
+            minSpread=request.data.min_spread,
+            maxPositionUsd=request.data.max_position_usd,
+            allowedCollateral=request.data.allowed_collateral,
+            pause=request.data.pause,
+        )
+        return endpoints.SetEnsConstitutionResponse(constitution=EnsConstitutionResource.model_validate(data))
+
     @json_route(requestType=endpoints.SendChatMessageRequest, responseType=endpoints.SendChatMessageResponse)
     @authorize_signature(authorizer=agentManager)
     async def send_chat_message(request: KibaApiRequest[endpoints.SendChatMessageRequest]) -> endpoints.SendChatMessageResponse:
@@ -267,6 +289,8 @@ def create_v1_routes(agentManager: AgentManager) -> list[Route]:
         Route('/v1/telegram-webhook', endpoint=process_telegram_webhook, methods=['POST']),
         Route('/v1/ens/check-name', endpoint=check_ens_name, methods=['POST']),
         Route('/v1/users/{userAddress:str}/ens/config-transactions', endpoint=get_ens_config_transactions, methods=['POST']),
+        Route('/v1/users/{userAddress:str}/ens/constitution', endpoint=get_ens_constitution, methods=['GET']),
+        Route('/v1/users/{userAddress:str}/ens/constitution', endpoint=set_ens_constitution, methods=['POST']),
         Route('/v1/users/{userAddress:str}/agents/{agentId:str}/chat', endpoint=send_chat_message, methods=['POST']),
         Route('/v1/users/{userAddress:str}/agents/{agentId:str}/chat/history', endpoint=get_chat_history, methods=['GET']),
         Route('/v1/agents/{agentId:str}/thoughts', endpoint=get_agent_thoughts, methods=['GET']),

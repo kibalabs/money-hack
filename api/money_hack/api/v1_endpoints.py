@@ -172,6 +172,26 @@ class GetEnsConfigTransactionsResponse(BaseModel):
     ens_name: str
 
 
+class GetEnsConstitutionRequest(BaseModel):
+    pass
+
+
+class GetEnsConstitutionResponse(BaseModel):
+    constitution: resources.EnsConstitutionResource
+
+
+class SetEnsConstitutionRequest(BaseModel):
+    max_ltv: float | None = None
+    min_spread: float | None = None
+    max_position_usd: float | None = None
+    allowed_collateral: str | None = None
+    pause: bool = False
+
+
+class SetEnsConstitutionResponse(BaseModel):
+    constitution: resources.EnsConstitutionResource
+
+
 class CreateAgentRequest(BaseModel):
     name: str
     emoji: str

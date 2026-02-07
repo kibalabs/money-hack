@@ -1,12 +1,10 @@
 import math
 import time
 from dataclasses import dataclass
-from dataclasses import field
 
 from core import logging
 from core.requester import Requester
 
-from money_hack import constants
 from money_hack.blockchain_data.alchemy_client import AlchemyClient
 
 

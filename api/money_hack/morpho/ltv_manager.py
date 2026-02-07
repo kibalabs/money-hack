@@ -255,11 +255,7 @@ class LtvManager:
             try:
                 priceAnalysis = await self.priceIntelligenceService.get_price_analysis(chainId=self.chainId, assetAddress=collateralAddress)
                 if priceAnalysis.is_volatile(threshold=VOLATILITY_THRESHOLD):
-                    return True, (
-                        f'Optimization suppressed: high volatility '
-                        f'(1h change: {priceAnalysis.change_1h_pct:+.2%}, '
-                        f'24h vol: {priceAnalysis.volatility_24h:.2%})'
-                    )
+                    return True, (f'Optimization suppressed: high volatility (1h change: {priceAnalysis.change_1h_pct:+.2%}, 24h vol: {priceAnalysis.volatility_24h:.2%})')
             except Exception as e:  # noqa: BLE001
                 logging.warning(f'Failed to check price volatility for optimization gate: {e}')
 

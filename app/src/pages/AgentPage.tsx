@@ -5,7 +5,7 @@ import { Alignment, Box, Button, Direction, PaddingSize, Spacing, Stack, Text } 
 import { useToastManager } from '@kibalabs/ui-react-toast';
 
 import { useAuth } from '../AuthContext';
-import { Agent, AgentAction, ChatMessage, MarketData, Position, Wallet } from '../client/resources';
+import { Agent, AgentAction, ChatMessage, EnsConstitution, MarketData, Position, Wallet } from '../client/resources';
 import { AgentTerminal } from '../components/AgentTerminal';
 import { DepositDialog } from '../components/DepositDialog';
 import { DepositUsdcDialog } from '../components/DepositUsdcDialog';
@@ -31,6 +31,7 @@ export function AgentPage(): React.ReactElement {
   const [isWithdrawDialogOpen, setIsWithdrawDialogOpen] = React.useState<boolean>(false);
   const [isDepositDialogOpen, setIsDepositDialogOpen] = React.useState<boolean>(false);
   const [isDepositUsdcDialogOpen, setIsDepositUsdcDialogOpen] = React.useState<boolean>(false);
+  const [constitution, setConstitution] = React.useState<EnsConstitution | null>(null);
   const hasLoadedRef = React.useRef<boolean>(false);
   const [conversationId, setConversationId] = useLocalStorageState(`borrowbot-${accountAddress || 'default'}-conversationId`, localStorageClient);
 
@@ -66,6 +67,13 @@ export function AgentPage(): React.ReactElement {
         setWallet(fetchedWallet);
       } catch (walletError) {
         console.error('Failed to load wallet:', walletError);
+      }
+      // Fetch ENS constitution
+      try {
+        const fetchedConstitution = await moneyHackClient.getEnsConstitution(accountAddress, authToken);
+        setConstitution(fetchedConstitution);
+      } catch (constitutionError) {
+        console.error('Failed to load ENS constitution:', constitutionError);
       }
     } catch (error) {
       console.error('Failed to load position:', error);
@@ -242,6 +250,60 @@ export function AgentPage(): React.ReactElement {
         isRefreshing={isRefreshing}
         latestCriticalMessage={latestCriticalMessage}
       />
+
+      {constitution && constitution.ensName && (
+        <Box className='statCard' maxWidth='600px' isFullWidth={true}>
+          <Stack direction={Direction.Vertical} shouldAddGutters={true}>
+            <Stack direction={Direction.Horizontal} childAlignment={Alignment.Center} shouldAddGutters={true}>
+              <Text variant='bold'>ENS Constitution</Text>
+              <Stack.Item growthFactor={1} shrinkFactor={1} />
+              <Text variant='note'>{constitution.ensName}</Text>
+            </Stack>
+            <Spacing variant={PaddingSize.Narrow} />
+            <div className='rateComparison'>
+              <div className='rateRow'>
+                <Text>Max LTV</Text>
+                <Text variant='bold'>{constitution.maxLtv != null ? `${(constitution.maxLtv * 100).toFixed(0)}%` : 'Not set'}</Text>
+              </div>
+              <div className='rateRow'>
+                <Text>Min Spread</Text>
+                <Text variant='bold'>{constitution.minSpread != null ? `${(constitution.minSpread * 100).toFixed(2)}%` : 'Not set'}</Text>
+              </div>
+              <div className='rateRow'>
+                <Text>Max Position</Text>
+                <Text variant='bold'>{constitution.maxPositionUsd != null ? `$${constitution.maxPositionUsd.toLocaleString()}` : 'Not set'}</Text>
+              </div>
+              <div className='rateRow'>
+                <Text>Pause</Text>
+                <Text variant={constitution.pause ? 'bold-error' : 'bold-success'}>{constitution.pause ? 'PAUSED' : 'Active'}</Text>
+              </div>
+            </div>
+            {constitution.status && (
+              <React.Fragment>
+                <Spacing variant={PaddingSize.Narrow} />
+                <Stack direction={Direction.Horizontal} shouldAddGutters={true}>
+                  <Text variant='note'>
+                    {'Status: '}
+                    {constitution.status}
+                  </Text>
+                  {constitution.lastCheck && (
+                    <Text variant='note'>
+                      {'Last check: '}
+                      {new Date(constitution.lastCheck).toLocaleTimeString()}
+                    </Text>
+                  )}
+                </Stack>
+                {constitution.lastAction && (
+                  <Text variant='note'>
+                    {'Last action: '}
+                    {constitution.lastAction}
+                  </Text>
+                )}
+              </React.Fragment>
+            )}
+          </Stack>
+        </Box>
+      )}
 
       <Box maxWidth='600px' isFullWidth={true} style={{ marginTop: '32px' }}>
         <AgentTerminal

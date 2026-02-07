@@ -139,6 +139,20 @@ class ChatResponse(BaseModel):
     conversation_id: str
 
 
+class EnsConstitutionResource(BaseModel):
+    """ENS constitution and status for an agent."""
+
+    ens_name: str | None = None
+    max_ltv: float | None = None
+    min_spread: float | None = None
+    max_position_usd: float | None = None
+    allowed_collateral: str | None = None
+    pause: bool = False
+    status: str | None = None
+    last_action: str | None = None
+    last_check: str | None = None
+
+
 class AgentActionResource(BaseModel):
     """An agent action or thought."""
 
