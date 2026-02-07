@@ -10,6 +10,7 @@ from money_hack.model import Agent
 from money_hack.model import AgentAction
 from money_hack.model import AgentPosition
 from money_hack.model import ChatEvent
+from money_hack.model import CrossChainAction
 from money_hack.model import User
 from money_hack.model import UserWallet
 from money_hack.store.entity_repository import UUIDFieldFilter
@@ -17,6 +18,7 @@ from money_hack.store.schema import AgentActionsRepository
 from money_hack.store.schema import AgentPositionsRepository
 from money_hack.store.schema import AgentsRepository
 from money_hack.store.schema import ChatEventsRepository
+from money_hack.store.schema import CrossChainActionsRepository
 from money_hack.store.schema import UsersRepository
 from money_hack.store.schema import UserWalletsRepository
 
@@ -308,4 +310,73 @@ class DatabaseStore:
             fieldFilters=[UUIDFieldFilter(fieldName='agentId', eq=agentId)],
             orders=[Order(fieldName='createdDate', direction=Direction.DESCENDING)],
             limit=limit,
+        )
+
+    async def create_cross_chain_action(
+        self,
+        agentId: str,
+        actionType: str,
+        fromChain: int,
+        toChain: int,
+        fromToken: str,
+        toToken: str,
+        amount: str,
+        txHash: str | None,
+        bridgeName: str | None,
+        status: str,
+        details: dict[str, object],
+    ) -> CrossChainAction:
+        return await CrossChainActionsRepository.create(
+            database=self.database,
+            agentId=agentId,
+            actionType=actionType,
+            fromChain=fromChain,
+            toChain=toChain,
+            fromToken=fromToken,
+            toToken=toToken,
+            amount=amount,
+            txHash=txHash,
+            bridgeName=bridgeName,
+            status=status,
+            details=details,
+        )
+
+    async def get_pending_cross_chain_actions(self, agentId: str) -> list[CrossChainAction]:
+        return await CrossChainActionsRepository.list_many(
+            database=self.database,
+            fieldFilters=[
+                UUIDFieldFilter(fieldName='agentId', eq=agentId),
+                StringFieldFilter(fieldName='status', containedIn=['pending', 'in_flight']),
+            ],
+        )
+
+    async def get_cross_chain_actions(self, agentId: str, limit: int = 20) -> list[CrossChainAction]:
+        return await CrossChainActionsRepository.list_many(
+            database=self.database,
+            fieldFilters=[UUIDFieldFilter(fieldName='agentId', eq=agentId)],
+            orders=[Order(fieldName='createdDate', direction=Direction.DESCENDING)],
+            limit=limit,
+        )
+
+    async def update_cross_chain_action(
+        self,
+        crossChainActionId: int,
+        status: str | None = None,
+        txHash: str | None = None,
+        bridgeName: str | None = None,
+        details: dict[str, object] | None = None,
+    ) -> CrossChainAction:
+        kwargs: dict[str, object] = {'crossChainActionId': crossChainActionId}
+        if status is not None:
+            kwargs['status'] = status
+        if txHash is not None:
+            kwargs['txHash'] = txHash
+        if bridgeName is not None:
+            kwargs['bridgeName'] = bridgeName
+        if details is not None:
+            kwargs['details'] = details
+        return await CrossChainActionsRepository.update(
+            database=self.database,
+            connection=None,
+            **kwargs,
         )

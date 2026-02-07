@@ -338,6 +338,40 @@ export class AgentAction {
   };
 }
 
+export class CrossChainAction {
+  public constructor(
+    readonly actionId: number,
+    readonly createdDate: Date,
+    readonly actionType: string,
+    readonly fromChain: number,
+    readonly toChain: number,
+    readonly fromToken: string,
+    readonly toToken: string,
+    readonly amount: bigint,
+    readonly txHash: string | null,
+    readonly bridgeName: string | null,
+    readonly status: string,
+    readonly details: Record<string, unknown>,
+  ) { }
+
+  public static fromObject = (obj: RawObject): CrossChainAction => {
+    return new CrossChainAction(
+      Number(obj.action_id),
+      dateFromString(String(obj.created_date)),
+      String(obj.action_type),
+      Number(obj.from_chain),
+      Number(obj.to_chain),
+      String(obj.from_token),
+      String(obj.to_token),
+      BigInt(obj.amount as string),
+      obj.tx_hash ? String(obj.tx_hash) : null,
+      obj.bridge_name ? String(obj.bridge_name) : null,
+      String(obj.status),
+      obj.details as Record<string, unknown>,
+    );
+  };
+}
+
 export class EnsConstitution {
   public constructor(
     readonly ensName: string | null,

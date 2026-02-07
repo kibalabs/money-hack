@@ -268,6 +268,44 @@ def create_v1_routes(agentManager: AgentManager) -> list[Route]:
         )
         return endpoints.GetAgentThoughtsResponse(actions=thoughts)
 
+    @json_route(requestType=endpoints.GetCrossChainActionsRequest, responseType=endpoints.GetCrossChainActionsResponse)
+    @authorize_signature(authorizer=agentManager)
+    async def get_cross_chain_actions(request: KibaApiRequest[endpoints.GetCrossChainActionsRequest]) -> endpoints.GetCrossChainActionsResponse:
+        userAddress = request.path_params.get('userAddress', '')
+        actions = await agentManager.get_cross_chain_actions(
+            user_address=userAddress,
+            limit=request.data.limit,
+        )
+        return endpoints.GetCrossChainActionsResponse(actions=actions)
+
+    @json_route(requestType=endpoints.CrossChainWithdrawRequest, responseType=endpoints.CrossChainWithdrawResponse)
+    @authorize_signature(authorizer=agentManager)
+    async def cross_chain_withdraw(request: KibaApiRequest[endpoints.CrossChainWithdrawRequest]) -> endpoints.CrossChainWithdrawResponse:
+        userAddress = request.path_params.get('userAddress', '')
+        action = await agentManager.execute_cross_chain_withdraw(
+            user_address=userAddress,
+            amount=request.data.amount,
+            to_chain=request.data.to_chain,
+            to_token=request.data.to_token,
+            to_address=request.data.to_address,
+        )
+        return endpoints.CrossChainWithdrawResponse(action=action)
+
+    @json_route(requestType=endpoints.RecordCrossChainDepositRequest, responseType=endpoints.RecordCrossChainDepositResponse)
+    @authorize_signature(authorizer=agentManager)
+    async def record_cross_chain_deposit(request: KibaApiRequest[endpoints.RecordCrossChainDepositRequest]) -> endpoints.RecordCrossChainDepositResponse:
+        userAddress = request.path_params.get('userAddress', '')
+        action = await agentManager.record_cross_chain_deposit(
+            user_address=userAddress,
+            from_chain=request.data.from_chain,
+            from_token=request.data.from_token,
+            to_token=request.data.to_token,
+            amount=request.data.amount,
+            tx_hash=request.data.tx_hash,
+            bridge_name=request.data.bridge_name,
+        )
+        return endpoints.RecordCrossChainDepositResponse(action=action)
+
     return [
         Route('/v1/collaterals', endpoint=get_supported_collaterals, methods=['GET']),
         Route('/v1/market-data', endpoint=get_market_data, methods=['GET']),
@@ -294,4 +332,7 @@ def create_v1_routes(agentManager: AgentManager) -> list[Route]:
         Route('/v1/users/{userAddress:str}/agents/{agentId:str}/chat', endpoint=send_chat_message, methods=['POST']),
         Route('/v1/users/{userAddress:str}/agents/{agentId:str}/chat/history', endpoint=get_chat_history, methods=['GET']),
         Route('/v1/agents/{agentId:str}/thoughts', endpoint=get_agent_thoughts, methods=['GET']),
+        Route('/v1/users/{userAddress:str}/cross-chain-actions', endpoint=get_cross_chain_actions, methods=['GET']),
+        Route('/v1/users/{userAddress:str}/cross-chain-withdraw', endpoint=cross_chain_withdraw, methods=['POST']),
+        Route('/v1/users/{userAddress:str}/cross-chain-deposit', endpoint=record_cross_chain_deposit, methods=['POST']),
     ]

@@ -162,3 +162,18 @@ class AgentActionResource(BaseModel):
     action_type: str
     value: str
     details: dict[str, object]
+
+
+class CrossChainActionResource(BaseModel):
+    action_id: int
+    created_date: datetime
+    action_type: str
+    from_chain: int
+    to_chain: int
+    from_token: str
+    to_token: str
+    amount: str
+    tx_hash: str | None = None
+    bridge_name: str | None = None
+    status: str
+    details: dict[str, object]

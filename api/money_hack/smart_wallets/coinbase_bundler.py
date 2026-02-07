@@ -28,6 +28,8 @@ WHITELISTED_ADDRESSES = {
     # ENS (mainnet)
     '0x231b0Ee14048e9dCcD1d247744d114a4EB5E8E63',  # ENS Public Resolver (text records + multicall)
     '0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e',  # ENS Registry (subname registration)
+    # LI.FI
+    '0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE',  # LI.FI Diamond Proxy (cross-chain bridge router)
 }
 
 

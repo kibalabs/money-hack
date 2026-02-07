@@ -638,3 +638,103 @@ export class SetEnsConstitutionResponse extends ResponseData {
     );
   };
 }
+
+export class GetCrossChainActionsRequest extends RequestData {
+  public constructor(
+    readonly limit: number,
+  ) {
+    super();
+  }
+
+  public toObject = (): RawObject => {
+    return {
+      limit: this.limit,
+    };
+  };
+}
+
+export class GetCrossChainActionsResponse extends ResponseData {
+  public constructor(
+    readonly actions: Resources.CrossChainAction[],
+  ) {
+    super();
+  }
+
+  public static fromObject = (obj: RawObject): GetCrossChainActionsResponse => {
+    return new GetCrossChainActionsResponse(
+      (obj.actions as RawObject[]).map(Resources.CrossChainAction.fromObject),
+    );
+  };
+}
+
+export class CrossChainWithdrawRequest extends RequestData {
+  public constructor(
+    readonly amount: string,
+    readonly to_chain: number,
+    readonly to_token: string,
+    readonly to_address: string,
+  ) {
+    super();
+  }
+
+  public toObject = (): RawObject => {
+    return {
+      amount: this.amount,
+      to_chain: this.to_chain,
+      to_token: this.to_token,
+      to_address: this.to_address,
+    };
+  };
+}
+
+export class CrossChainWithdrawResponse extends ResponseData {
+  public constructor(
+    readonly action: Resources.CrossChainAction,
+  ) {
+    super();
+  }
+
+  public static fromObject = (obj: RawObject): CrossChainWithdrawResponse => {
+    return new CrossChainWithdrawResponse(
+      Resources.CrossChainAction.fromObject(obj.action as RawObject),
+    );
+  };
+}
+
+export class RecordCrossChainDepositRequest extends RequestData {
+  public constructor(
+    readonly from_chain: number,
+    readonly from_token: string,
+    readonly to_token: string,
+    readonly amount: string,
+    readonly tx_hash: string | null,
+    readonly bridge_name: string | null,
+  ) {
+    super();
+  }
+
+  public toObject = (): RawObject => {
+    return {
+      from_chain: this.from_chain,
+      from_token: this.from_token,
+      to_token: this.to_token,
+      amount: this.amount,
+      tx_hash: this.tx_hash,
+      bridge_name: this.bridge_name,
+    };
+  };
+}
+
+export class RecordCrossChainDepositResponse extends ResponseData {
+  public constructor(
+    readonly action: Resources.CrossChainAction,
+  ) {
+    super();
+  }
+
+  public static fromObject = (obj: RawObject): RecordCrossChainDepositResponse => {
+    return new RecordCrossChainDepositResponse(
+      Resources.CrossChainAction.fromObject(obj.action as RawObject),
+    );
+  };
+}

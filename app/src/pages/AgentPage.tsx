@@ -5,8 +5,9 @@ import { Alignment, Box, Button, Direction, PaddingSize, Spacing, Stack, Text } 
 import { useToastManager } from '@kibalabs/ui-react-toast';
 
 import { useAuth } from '../AuthContext';
-import { Agent, AgentAction, ChatMessage, EnsConstitution, MarketData, Position, Wallet } from '../client/resources';
+import { Agent, AgentAction, ChatMessage, CrossChainAction, EnsConstitution, MarketData, Position, Wallet } from '../client/resources';
 import { AgentTerminal } from '../components/AgentTerminal';
+import { CrossChainPanel } from '../components/CrossChainPanel';
 import { DepositDialog } from '../components/DepositDialog';
 import { DepositUsdcDialog } from '../components/DepositUsdcDialog';
 import { FloatingChat } from '../components/FloatingChat';
@@ -32,6 +33,7 @@ export function AgentPage(): React.ReactElement {
   const [isDepositDialogOpen, setIsDepositDialogOpen] = React.useState<boolean>(false);
   const [isDepositUsdcDialogOpen, setIsDepositUsdcDialogOpen] = React.useState<boolean>(false);
   const [constitution, setConstitution] = React.useState<EnsConstitution | null>(null);
+  const [crossChainActions, setCrossChainActions] = React.useState<CrossChainAction[]>([]);
   const hasLoadedRef = React.useRef<boolean>(false);
   const [conversationId, setConversationId] = useLocalStorageState(`borrowbot-${accountAddress || 'default'}-conversationId`, localStorageClient);
 
@@ -74,6 +76,13 @@ export function AgentPage(): React.ReactElement {
         setConstitution(fetchedConstitution);
       } catch (constitutionError) {
         console.error('Failed to load ENS constitution:', constitutionError);
+      }
+      // Fetch cross-chain actions
+      try {
+        const fetchedCrossChainActions = await moneyHackClient.getCrossChainActions(accountAddress, 10, authToken);
+        setCrossChainActions(fetchedCrossChainActions);
+      } catch (ccError) {
+        console.error('Failed to load cross-chain actions:', ccError);
       }
     } catch (error) {
       console.error('Failed to load position:', error);
@@ -262,6 +271,11 @@ export function AgentPage(): React.ReactElement {
           </Stack>
         </Box>
       )}
+
+      <CrossChainPanel
+        actions={crossChainActions}
+        isLoading={isLoading}
+      />
 
       <Box maxWidth='600px' isFullWidth={true} style={{ marginTop: '32px' }}>
         <AgentTerminal

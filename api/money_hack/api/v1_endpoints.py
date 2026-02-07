@@ -247,3 +247,35 @@ class GetAgentThoughtsRequest(BaseModel):
 
 class GetAgentThoughtsResponse(BaseModel):
     actions: list[resources.AgentActionResource]
+
+
+class GetCrossChainActionsRequest(BaseModel):
+    limit: int = 20
+
+
+class GetCrossChainActionsResponse(BaseModel):
+    actions: list[resources.CrossChainActionResource]
+
+
+class CrossChainWithdrawRequest(BaseModel):
+    amount: str
+    to_chain: int
+    to_token: str
+    to_address: str
+
+
+class CrossChainWithdrawResponse(BaseModel):
+    action: resources.CrossChainActionResource
+
+
+class RecordCrossChainDepositRequest(BaseModel):
+    from_chain: int
+    from_token: str
+    to_token: str
+    amount: str
+    tx_hash: str | None = None
+    bridge_name: str | None = None
+
+
+class RecordCrossChainDepositResponse(BaseModel):
+    action: resources.CrossChainActionResource

@@ -5,6 +5,7 @@ from money_hack.model import Agent
 from money_hack.model import AgentAction
 from money_hack.model import AgentPosition
 from money_hack.model import ChatEvent
+from money_hack.model import CrossChainAction
 from money_hack.model import User
 from money_hack.model import UserWallet
 from money_hack.store.entity_repository import EntityRepository
@@ -104,3 +105,25 @@ ChatEventsTable = sqlalchemy.Table(
 )
 
 ChatEventsRepository = EntityRepository(table=ChatEventsTable, modelClass=ChatEvent)
+
+
+CrossChainActionsTable = sqlalchemy.Table(
+    'tbl_cross_chain_actions',
+    metadata,
+    sqlalchemy.Column(key='crossChainActionId', name='id', type_=sqlalchemy.Integer, autoincrement=True, primary_key=True, nullable=False),
+    sqlalchemy.Column(key='createdDate', name='created_date', type_=sqlalchemy.DateTime, nullable=False),
+    sqlalchemy.Column(key='updatedDate', name='updated_date', type_=sqlalchemy.DateTime, nullable=False),
+    sqlalchemy.Column(key='agentId', name='agent_id', type_=sqlalchemy_psql.UUID, nullable=False, index=True),
+    sqlalchemy.Column(key='actionType', name='action_type', type_=sqlalchemy.Text, nullable=False),
+    sqlalchemy.Column(key='fromChain', name='from_chain', type_=sqlalchemy.Integer, nullable=False),
+    sqlalchemy.Column(key='toChain', name='to_chain', type_=sqlalchemy.Integer, nullable=False),
+    sqlalchemy.Column(key='fromToken', name='from_token', type_=sqlalchemy.Text, nullable=False),
+    sqlalchemy.Column(key='toToken', name='to_token', type_=sqlalchemy.Text, nullable=False),
+    sqlalchemy.Column(key='amount', name='amount', type_=sqlalchemy.Text, nullable=False),
+    sqlalchemy.Column(key='txHash', name='tx_hash', type_=sqlalchemy.Text, nullable=True),
+    sqlalchemy.Column(key='bridgeName', name='bridge_name', type_=sqlalchemy.Text, nullable=True),
+    sqlalchemy.Column(key='status', name='status', type_=sqlalchemy.Text, nullable=False),
+    sqlalchemy.Column(key='details', name='details', type_=sqlalchemy_psql.JSONB, nullable=False),
+)
+
+CrossChainActionsRepository = EntityRepository(table=CrossChainActionsTable, modelClass=CrossChainAction)

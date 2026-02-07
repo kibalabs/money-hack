@@ -98,10 +98,57 @@ BorrowBot is an autonomous agent on **Base** that manages overcollateralized loa
 
 * **Outcome**: ENS text records on Base L2 (Basenames) serve as a decentralized governance layer. Owners set guardrails (`com.borrowbot.max-ltv`, `com.borrowbot.min-spread`, `com.borrowbot.pause`, etc.) via ENS, and the agent reads its constitution before every action cycle. The agent writes status back (`com.borrowbot.status`, `com.borrowbot.last-action`, `com.borrowbot.last-check`). Fixed critical `namehash()` bug (was NIST SHA-3, now keccak256). Frontend constitution panel on AgentPage. Targets ETHGlobal "Most Creative Use of ENS for DeFi" prize.
 
-### 🔲 Phase 19: Uniswap Integration
+### ✅ Phase 19: LI.FI Cross-Chain Access (Composer + AI Agent)
+
+* **Goal**: Use LI.FI to make BorrowBot a cross-chain product — users deposit from any chain, agent manages everything on Base, users withdraw to any chain.
+* **Strategy**: Base is the single execution chain (collateral + Morpho borrow + vault yield + LTV management). LI.FI Composer handles all cross-chain routing — deposit ingestion from any chain and withdrawal delivery to any chain. The agent never needs gas on any chain except Base (Coinbase Paymaster sponsors all agent transactions).
+* **Targets**: "Best AI x LI.FI Smart App" ($2,000) + "Best Use of LI.FI Composer" ($2,500)
+
+#### Phase 19A: LI.FI Client + Cross-Chain Quote
+
+* **Outcome**: Backend can fetch LI.FI quotes for cross-chain bridge+swap in one call.
+* **Design Details**:
+  * `LiFiClient` in `money_hack/external/lifi_client.py` — REST wrapper around `https://li.quest/v1`
+  * `get_quote(fromChain, toChain, fromToken, toToken, fromAmount, fromAddress)` → returns route + transactionRequest
+  * `get_status(bridge, fromChain, toChain, txHash)` → returns transfer status (PENDING/DONE/FAILED)
+  * Frontend uses LI.FI Widget for cross-chain deposits (user-initiated, user pays source chain gas)
+
+#### Phase 19B: Cross-Chain Deposits (Any Chain → Base)
+
+* **Outcome**: Users can deposit collateral from any supported chain into their BorrowBot position.
+* **Design Details**:
+  * Frontend `LiFiDepositDialog` embeds LI.FI Widget configured with `toChain=Base`, `toToken=collateral/USDC`, `toAddress=agentWallet`
+  * User initiates deposit from any chain (Ethereum, Arbitrum, Optimism, Polygon, etc.) — user pays gas on source chain
+  * LI.FI Composer routes: source chain token → bridge → Base collateral asset, delivered directly to agent wallet
+  * Agent's existing worker loop auto-detects idle wallet assets and deploys them into the Morpho position
+  * Cross-chain action logged in `cross_chain_actions` DB table for tracking
+  * Frontend shows deposit status via `CrossChainPanel` component
+
+#### Phase 19C: Cross-Chain Withdrawals (Base → Any Chain)
+
+* **Outcome**: Users can withdraw earned USDC to any chain, with the agent executing the bridge on Base via paymaster.
+* **Design Details**:
+  * User requests cross-chain withdrawal via API: specifies amount, destination chain, destination token, destination address
+  * Agent withdraws USDC from Yo vault on Base (existing withdraw logic)
+  * Agent approves USDC to LI.FI router on Base + executes LI.FI Composer transaction on Base — all via Coinbase Paymaster (no gas needed)
+  * LI.FI Composer routes: Base USDC → bridge → destination chain token, delivered to user's wallet
+  * Agent polls LI.FI `/status` API to track bridge completion
+  * LTV safety check before withdrawal (same as existing withdraw flow)
+  * Cross-chain action logged with bridge status tracking
+
+#### Phase 19D: Cross-Chain Dashboard UI
+
+* **Outcome**: Frontend shows cross-chain deposit/withdrawal activity and bridge status.
+* **Design Details**:
+  * `CrossChainPanel` on AgentPage shows recent cross-chain actions: deposits from other chains, withdrawals to other chains
+  * Action type labels: "Deposit" (inbound from other chain) and "Withdraw" (outbound to other chain)
+  * Status tracking: pending → in_flight → completed / failed
+  * Chain names, bridge name, amount, and tx hash displayed for each action
+
+### 🔲 Phase 20: Uniswap Integration
 
 * **Goal**: Expand asset support by using Uniswap for automated swaps between collateral types and yield rewards.
 
-### 🔲 Phase 20: Agent Wallet & Security (Stretch)
+### 🔲 Phase 21: Agent Wallet & Security (Stretch)
 
 * **Goal**: Use ERC-4337 smart wallets to restrict agent permissions to only approved protocol adapters.

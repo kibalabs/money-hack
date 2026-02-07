@@ -190,4 +190,28 @@ export class MoneyHackClient extends ServiceClient {
     const response = await this.makeRequest(method, path, request, Endpoints.SetEnsConstitutionResponse, this.getHeaders(authToken));
     return response.constitution;
   };
+
+  public getCrossChainActions = async (userAddress: string, limit: number, authToken: string): Promise<Resources.CrossChainAction[]> => {
+    const method = RestMethod.GET;
+    const path = `v1/users/${userAddress}/cross-chain-actions`;
+    const request = new Endpoints.GetCrossChainActionsRequest(limit);
+    const response = await this.makeRequest(method, path, request, Endpoints.GetCrossChainActionsResponse, this.getHeaders(authToken));
+    return response.actions;
+  };
+
+  public crossChainWithdraw = async (userAddress: string, amount: string, toChain: number, toToken: string, toAddress: string, authToken: string): Promise<Resources.CrossChainAction> => {
+    const method = RestMethod.POST;
+    const path = `v1/users/${userAddress}/cross-chain-withdraw`;
+    const request = new Endpoints.CrossChainWithdrawRequest(amount, toChain, toToken, toAddress);
+    const response = await this.makeRequest(method, path, request, Endpoints.CrossChainWithdrawResponse, this.getHeaders(authToken));
+    return response.action;
+  };
+
+  public recordCrossChainDeposit = async (userAddress: string, fromChain: number, fromToken: string, toToken: string, amount: string, txHash: string | null, bridgeName: string | null, authToken: string): Promise<Resources.CrossChainAction> => {
+    const method = RestMethod.POST;
+    const path = `v1/users/${userAddress}/cross-chain-deposit`;
+    const request = new Endpoints.RecordCrossChainDepositRequest(fromChain, fromToken, toToken, amount, txHash, bridgeName);
+    const response = await this.makeRequest(method, path, request, Endpoints.RecordCrossChainDepositResponse, this.getHeaders(authToken));
+    return response.action;
+  };
 }

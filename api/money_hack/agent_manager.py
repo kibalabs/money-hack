@@ -34,6 +34,7 @@ from money_hack.api.authorizer import Authorizer
 from money_hack.api.v1_resources import Agent as AgentResource
 from money_hack.api.v1_resources import AgentActionResource
 from money_hack.api.v1_resources import AssetBalance
+from money_hack.api.v1_resources import CrossChainActionResource
 from money_hack.api.v1_resources import AuthToken
 from money_hack.api.v1_resources import ClosePositionTransactionsData
 from money_hack.api.v1_resources import CollateralAsset
@@ -55,6 +56,8 @@ from money_hack.external.ens_client import EnsConstitution
 from money_hack.external.telegram_client import TelegramClient
 from money_hack.forty_acres.forty_acres_client import FortyAcresClient
 from money_hack.morpho import morpho_abis
+from money_hack.cross_chain_yield_manager import CrossChainManager
+from money_hack.external.lifi_client import LiFiClient
 from money_hack.morpho.ltv_manager import LtvManager
 from money_hack.morpho.morpho_client import MorphoClient
 from money_hack.morpho.transaction_builder import TransactionBuilder
@@ -122,6 +125,8 @@ class AgentManager(Authorizer):  # Core manager
         notificationService: NotificationService | None = None,
         priceIntelligenceService: 'PriceIntelligenceService | None' = None,
         mainnetEthClient: RestEthClient | None = None,
+        lifiClient: LiFiClient | None = None,
+        crossChainManager: CrossChainManager | None = None,
     ) -> None:
         self.chainId = chainId
         self.requester = requester
@@ -145,6 +150,8 @@ class AgentManager(Authorizer):  # Core manager
         self.deployerTransactionLock = asyncio.Lock()
         self.chatBot = chatBot
         self.chatHistoryStore = chatHistoryStore
+        self.lifiClient = lifiClient
+        self.crossChainManager = crossChainManager
         self._signatureSignerMap: dict[str, str] = {}
         self._userConfigsCache: dict[str, UserConfig] = {}
 
@@ -561,6 +568,7 @@ class AgentManager(Authorizer):  # Core manager
                             newLtv=result.target_ltv,
                             priceContext=priceContext,
                         )
+                        # Cross-chain yield deployment removed — all yield stays on Base
                     except Exception:  # noqa: BLE001
                         logging.exception(f'Failed to auto-optimize for position {position.agentPositionId}')
                 elif result.needs_action and result.action_type == 'manual_repay':
@@ -624,11 +632,36 @@ class AgentManager(Authorizer):  # Core manager
                             )
                     except Exception:  # noqa: BLE001
                         logging.exception(f'Failed to deploy idle USDC for position {position.agentPositionId}')
+                # Cross-chain yield: poll pending actions and log results
+                if self.crossChainManager:
+                    try:
+                        statusResults = await self.crossChainManager.check_pending_actions(agentId=position.agentId)
+                        for statusResult in statusResults:
+                            await self.databaseStore.log_agent_action(
+                                agentId=position.agentId,
+                                actionType='cross_chain_status',
+                                value=statusResult.new_status,
+                                valueId=str(statusResult.action_id),
+                                details={
+                                    'old_status': statusResult.old_status,
+                                    'new_status': statusResult.new_status,
+                                    'is_complete': statusResult.is_complete,
+                                },
+                            )
+                            if statusResult.new_status == 'failed' and self.notificationService:
+                                await self.notificationService.send_cross_chain_failed(
+                                    agent=agent,
+                                    user=user,
+                                    actionId=statusResult.action_id,
+                                )
+                    except Exception:  # noqa: BLE001
+                        logging.exception(f'Failed to check cross-chain status for position {position.agentPositionId}')
                 # Handle Critical Threshold warning (even after action attempts)
                 currentLtv = result.current_ltv
                 maxLtv = result.max_ltv
                 isCritical = currentLtv >= CRITICAL_LTV_THRESHOLD * maxLtv and maxLtv > 0
-                if isCritical and result.action_type != 'manual_repay':
+                canAgentManage = (onchainVaultAssets or 0) > 0
+                if isCritical and not canAgentManage:
                     await self.notificationService.send_critical_ltv_warning(
                         agent=agent,
                         user=user,
@@ -1029,6 +1062,173 @@ class AgentManager(Authorizer):  # Core manager
                 newLtv=preview.estimated_new_ltv,
             )
         return WithdrawTransactionsData(transactions=transactions, withdraw_amount=str(withdrawAmount), vault_address=YO_VAULT_ADDRESS)
+
+    async def execute_cross_chain_withdraw(
+        self,
+        user_address: str,
+        amount: str,
+        to_chain: int,
+        to_token: str,
+        to_address: str,
+    ) -> CrossChainActionResource:
+        """Execute a cross-chain withdrawal: withdraw USDC from vault on Base, bridge to destination chain via LI.FI.
+
+        The agent executes both the vault withdrawal and the LI.FI bridge transaction on Base using the paymaster.
+        """
+        if not self.crossChainManager:
+            raise BadRequestException('Cross-chain manager is not configured')
+        normalizedAddress = chain_util.normalize_address(user_address)
+        user = await self.databaseStore.get_user_by_wallet(walletAddress=normalizedAddress)
+        if user is None:
+            raise NotFoundException(message='User not found')
+        agents = await self.databaseStore.get_agents_by_user(userId=user.userId)
+        if not agents:
+            raise NotFoundException(message='No agents found')
+        agent = agents[0]
+        dbPosition = await self.databaseStore.get_position_by_agent(agentId=agent.agentId)
+        if dbPosition is None:
+            raise NotFoundException(message='No active position found')
+        withdrawAmount = int(amount)
+        # Check vault balance
+        _actualVaultShares, actualAssets = await self._get_actual_vault_balance(agentWalletAddress=agent.walletAddress)
+        if withdrawAmount > actualAssets:
+            raise BadRequestException(message=f'Requested withdrawal ${withdrawAmount / 1e6:.2f} exceeds actual vault balance ${actualAssets / 1e6:.2f}')
+        # Check LTV safety
+        preview = await self._calc_withdraw_preview(userAddress=user_address, withdrawAmountRaw=withdrawAmount)
+        if preview.is_blocked:
+            raise BadRequestException(message=preview.warning_message or 'Withdrawal amount is too large for safe LTV')
+        # Step 1: Prepare the LI.FI quote
+        prepareResult = await self.crossChainManager.prepare_cross_chain_withdrawal(
+            agentId=agent.agentId,
+            agentWalletAddress=agent.walletAddress,
+            usdcAmount=withdrawAmount,
+            toChain=to_chain,
+            toToken=to_token,
+            toAddress=to_address,
+        )
+        if not prepareResult.success or prepareResult.action_id is None:
+            raise BadRequestException(message=f'Failed to prepare cross-chain withdrawal: {prepareResult.reason}')
+        # Step 2: Withdraw USDC from vault on Base
+        sharesToRedeemResponse = await self.ethClient.call_function_by_name(
+            toAddress=YO_VAULT_ADDRESS,
+            contractAbi=morpho_abis.ERC4626_VAULT_ABI,
+            functionName='convertToShares',
+            arguments={'assets': withdrawAmount},
+        )
+        sharesToRedeem = int(sharesToRedeemResponse[0])
+        usdcAddress = constants.CHAIN_USDC_MAP.get(self.chainId)
+        if usdcAddress is None:
+            raise ValueError(f'USDC not supported on chain {self.chainId}')
+        transactionBuilder = TransactionBuilder(chainId=self.chainId, usdcAddress=usdcAddress, yoVaultAddress=YO_VAULT_ADDRESS)
+        withdrawTxs = transactionBuilder.build_withdraw_transactions(user_address=agent.walletAddress, withdraw_shares=sharesToRedeem)
+        withdrawCalls = [EncodedCall(toAddress=tx.to, data=tx.data if tx.data.startswith('0x') else f'0x{tx.data}', value=int(tx.value or '0')) for tx in withdrawTxs]
+        await self._send_user_operation(agentWalletAddress=agent.walletAddress, calls=withdrawCalls)
+        logging.info(f'Withdrew {withdrawAmount} USDC from vault for cross-chain withdrawal')
+        # Step 3: Approve USDC to LI.FI router + execute bridge tx on Base
+        action = (await self.databaseStore.get_pending_cross_chain_actions(agentId=agent.agentId))[0]
+        approvalAddress = str(action.details.get('approval_address', ''))
+        txTo = str(action.details.get('tx_to', ''))
+        txData = str(action.details.get('tx_data', ''))
+        txValue = str(action.details.get('tx_value', '0x0'))
+        # Build approve + bridge calls
+        from web3 import Web3
+        erc20Abi = [{'inputs': [{'name': 'spender', 'type': 'address'}, {'name': 'amount', 'type': 'uint256'}], 'name': 'approve', 'outputs': [{'name': '', 'type': 'bool'}], 'stateMutability': 'nonpayable', 'type': 'function'}]
+        approveData = Web3().eth.contract(abi=erc20Abi).encode_abi('approve', args=[Web3.to_checksum_address(approvalAddress), withdrawAmount])
+        bridgeCalls: list[EncodedCall] = [
+            EncodedCall(toAddress=usdcAddress, data=approveData, value=0),
+            EncodedCall(toAddress=txTo, data=txData, value=int(txValue, 16) if txValue.startswith('0x') else int(txValue)),
+        ]
+        txHash = await self._send_user_operation(agentWalletAddress=agent.walletAddress, calls=bridgeCalls)
+        logging.info(f'Executed cross-chain bridge tx for withdrawal: {txHash}')
+        # Step 4: Update DB with txHash
+        updatedAction = await self.databaseStore.update_cross_chain_action(
+            crossChainActionId=prepareResult.action_id,
+            txHash=txHash,
+            status='in_flight',
+        )
+        await self.databaseStore.log_agent_action(
+            agentId=agent.agentId,
+            actionType='cross_chain_withdraw',
+            value=f'${withdrawAmount / 1e6:.2f}',
+            valueId=str(prepareResult.action_id),
+            details={
+                'amount': str(withdrawAmount),
+                'to_chain': to_chain,
+                'to_address': to_address,
+                'tx_hash': txHash,
+                'bridge': updatedAction.bridgeName,
+            },
+        )
+        if self.notificationService:
+            await self.notificationService.send_cross_chain_withdraw_initiated(
+                agent=agent,
+                user=user,
+                amount=withdrawAmount / 1e6,
+                toChain=to_chain,
+                actionId=prepareResult.action_id,
+            )
+        return CrossChainActionResource(
+            action_id=updatedAction.crossChainActionId,
+            created_date=updatedAction.createdDate,
+            action_type=updatedAction.actionType,
+            from_chain=updatedAction.fromChain,
+            to_chain=updatedAction.toChain,
+            from_token=updatedAction.fromToken,
+            to_token=updatedAction.toToken,
+            amount=updatedAction.amount,
+            tx_hash=updatedAction.txHash,
+            bridge_name=updatedAction.bridgeName,
+            status=updatedAction.status,
+            details=typing.cast('dict[str, object]', updatedAction.details),
+        )
+
+    async def record_cross_chain_deposit(
+        self,
+        user_address: str,
+        from_chain: int,
+        from_token: str,
+        to_token: str,
+        amount: str,
+        tx_hash: str | None = None,
+        bridge_name: str | None = None,
+    ) -> CrossChainActionResource:
+        """Record a user-initiated cross-chain deposit from the LI.FI Widget."""
+        if not self.crossChainManager:
+            raise BadRequestException('Cross-chain manager is not configured')
+        normalizedAddress = chain_util.normalize_address(user_address)
+        user = await self.databaseStore.get_user_by_wallet(walletAddress=normalizedAddress)
+        if user is None:
+            raise NotFoundException(message='User not found')
+        agents = await self.databaseStore.get_agents_by_user(userId=user.userId)
+        if not agents:
+            raise NotFoundException(message='No agents found')
+        agent = agents[0]
+        result = await self.crossChainManager.record_cross_chain_deposit(
+            agentId=agent.agentId,
+            fromChain=from_chain,
+            fromToken=from_token,
+            toToken=to_token,
+            amount=amount,
+            txHash=tx_hash,
+            bridgeName=bridge_name,
+        )
+        if not result.success or result.action_id is None:
+            raise BadRequestException(message=f'Failed to record deposit: {result.reason}')
+        action = (await self.databaseStore.get_cross_chain_actions(agentId=agent.agentId, limit=1))[0]
+        return CrossChainActionResource(
+            action_id=action.crossChainActionId,
+            created_date=action.createdDate,
+            action_type=action.actionType,
+            from_chain=action.fromChain,
+            to_chain=action.toChain,
+            from_token=action.fromToken,
+            to_token=action.toToken,
+            amount=action.amount,
+            tx_hash=action.txHash,
+            bridge_name=action.bridgeName,
+            status=action.status,
+            details=typing.cast('dict[str, object]', action.details),
+        )
 
     async def get_close_position_transactions(self, user_address: str) -> ClosePositionTransactionsData:
         """Build transactions to fully close a position: withdraw from vault, repay debt, withdraw collateral."""
@@ -1488,4 +1688,36 @@ class AgentManager(Authorizer):  # Core manager
                 details=typing.cast('dict[str, object]', thought.details),
             )
             for thought in thoughts
+        ]
+
+    async def get_cross_chain_actions(
+        self,
+        user_address: str,
+        limit: int = 20,
+    ) -> list[CrossChainActionResource]:
+        normalizedAddress = chain_util.normalize_address(user_address)
+        user = await self.databaseStore.get_user_by_wallet(walletAddress=normalizedAddress)
+        if user is None:
+            return []
+        agents = await self.databaseStore.get_agents_by_user(userId=user.userId)
+        if not agents:
+            return []
+        agent = agents[0]
+        actions = await self.databaseStore.get_cross_chain_actions(agentId=agent.agentId, limit=limit)
+        return [
+            CrossChainActionResource(
+                action_id=action.crossChainActionId,
+                created_date=action.createdDate,
+                action_type=action.actionType,
+                from_chain=action.fromChain,
+                to_chain=action.toChain,
+                from_token=action.fromToken,
+                to_token=action.toToken,
+                amount=action.amount,
+                tx_hash=action.txHash,
+                bridge_name=action.bridgeName,
+                status=action.status,
+                details=typing.cast('dict[str, object]', action.details),
+            )
+            for action in actions
         ]

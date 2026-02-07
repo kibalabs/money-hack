@@ -203,6 +203,38 @@ class NotificationService:
         await self._log_notification(agentId=agent.agentId, notificationType='daily_digest', message='Daily digest sent.', success=success)
         return success
 
+    async def send_cross_chain_failed(
+        self,
+        agent: Agent,
+        user: User,
+        actionId: int | None,
+    ) -> bool:
+        """Send notification when a cross-chain action fails."""
+        if not user.telegramChatId:
+            return False
+        message = f'⚠️ A cross-chain bridge action (#{actionId}) has failed. Please check your position.'
+        success = await self.telegramClient.send_message(chatId=user.telegramChatId, text=message)
+        await self._log_notification(agentId=agent.agentId, notificationType='cross_chain_failed', message=f'Cross-chain action #{actionId} failed', success=success)
+        return success
+
+    async def send_cross_chain_withdraw_initiated(
+        self,
+        agent: Agent,
+        user: User,
+        amount: float,
+        toChain: int,
+        actionId: int | None,
+    ) -> bool:
+        """Send notification when a cross-chain withdrawal is initiated."""
+        if not user.telegramChatId:
+            return False
+        chainNames = {1: 'Ethereum', 8453: 'Base', 42161: 'Arbitrum', 10: 'Optimism', 137: 'Polygon'}
+        chainName = chainNames.get(toChain, f'Chain {toChain}')
+        message = f'🌉 Cross-chain withdrawal initiated: ${amount:.2f} USDC → {chainName}. Bridge in progress (action #{actionId}).'
+        success = await self.telegramClient.send_message(chatId=user.telegramChatId, text=message)
+        await self._log_notification(agentId=agent.agentId, notificationType='cross_chain_withdraw', message=f'Cross-chain withdraw ${amount:.2f} to {chainName}', success=success)
+        return success
+
     async def send_position_closed(
         self,
         agent: Agent,

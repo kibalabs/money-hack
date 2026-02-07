@@ -58,6 +58,74 @@ ENS is not just a naming service — it's the governance layer for the agentic e
 
 TODO
 
-## Li.FI
+## Li.FI: Cross-Chain Access Layer
 
-TODO
+**Live demo:** User deposits WETH from Ethereum mainnet → LI.FI Composer bridges + converts to WETH on Base → agent wallet receives it → agent auto-deploys into Morpho position → user later withdraws USDC to Arbitrum → agent executes LI.FI bridge on Base via paymaster.
+
+### Pitch (30 seconds)
+
+BorrowBot uses LI.FI as its cross-chain access layer — making a Base-native lending agent accessible from every chain. Users deposit collateral from Ethereum, Arbitrum, Optimism, or any supported chain. LI.FI Composer routes the funds to Base and delivers them directly to the agent's wallet. The agent then autonomously deploys the collateral into a Morpho Blue position and starts earning yield. When the user wants to withdraw, the agent pulls USDC from the vault on Base and uses LI.FI Composer to bridge it to whichever chain the user wants — all executed autonomously on Base using the Coinbase Paymaster for gas. The agent never needs native gas tokens on any chain.
+
+LI.FI isn't just a bridge — it's how an autonomous agent on Base serves users on every chain.
+
+### How It Works
+
+**Cross-Chain Strategy: Any Chain → Base (Agent) → Any Chain**
+
+| Step | Chain | Action | LI.FI Role |
+|------|-------|--------|------------|
+| 1. Deposit collateral | Any → Base | User deposits from any chain | **LI.FI Composer** (bridge + convert) |
+| 2. Auto-deploy | Base | Agent detects idle assets, deploys into Morpho + vault | — |
+| 3. Monitor LTV | Base | Agent checks every 5 min, auto-rebalances | — |
+| 4. Earn yield | Base | USDC earning in Yo vault | — |
+| 5. Withdraw | Base → Any | User requests withdrawal to any chain | **LI.FI Composer** (bridge out) |
+| 6. Deliver | Destination | USDC/tokens arrive in user's wallet | — |
+
+**Cross-Chain Deposit Flow (User-Initiated)**
+
+1. User opens LI.FI Widget in BorrowBot frontend
+2. Selects source chain + source token (e.g., ETH on Ethereum, USDC on Arbitrum)
+3. LI.FI Composer routes: source chain token → bridge → Base collateral asset → agent wallet
+4. User signs one transaction on source chain (user pays gas there)
+5. Agent's 5-minute worker loop detects idle assets in wallet → auto-deploys into Morpho position
+6. Cross-chain deposit tracked in DB, visible in dashboard
+
+**Cross-Chain Withdrawal Flow (Agent-Executed)**
+
+1. User requests withdrawal via API: amount, destination chain, destination address
+2. Agent checks LTV safety (same as existing withdraw flow)
+3. Agent withdraws USDC from Yo vault on Base
+4. Agent approves USDC to LI.FI router + executes LI.FI Composer bridge tx — **all on Base, gas paid by Coinbase Paymaster**
+5. LI.FI bridges USDC to destination chain → delivers to user's wallet
+6. Agent polls LI.FI `/status` API to track completion, notifies user via Telegram
+
+**Cross-Chain Action States**
+
+| State | Meaning |
+|-------|---------|
+| `pending` | Action created, awaiting execution or bridge initiation |
+| `in_flight` | Bridge transaction submitted, waiting for cross-chain delivery |
+| `completed` | Funds delivered to destination |
+| `failed` | Bridge failed — agent notifies user, retries on next cycle |
+
+### Why This Wins
+
+**"Best AI x LI.FI Smart App" ($2,000)**
+- Not a one-shot integration — LI.FI is used for **both deposit ingestion and withdrawal delivery**, making it central to the product
+- The agent **autonomously executes** LI.FI Composer transactions on Base for withdrawals — a true AI × LI.FI workflow
+- Agent tracks bridge status via `/status` API and sends Telegram notifications on completion/failure
+- Combined with ENS constitution governance and autonomous LTV management — full agentic DeFi stack
+
+**"Best Use of LI.FI Composer" ($2,500)**
+- **Deposit direction**: LI.FI Widget + Composer routes any chain/token → Base collateral asset → agent wallet in a single user transaction
+- **Withdrawal direction**: Agent uses LI.FI Composer to route Base USDC → any destination chain/token → user wallet, executed on Base via paymaster
+- Demonstrates Composer in both user-initiated and agent-autonomous contexts
+- Cross-chain action log shows route details: bridge used, source/dest chains, amounts, status
+
+### Architecture
+
+- **LiFiClient**: REST wrapper (`money_hack/external/lifi_client.py`) calling `https://li.quest/v1/quote` and `/status`
+- **CrossChainManager**: Handles cross-chain withdrawals (agent-executed on Base) and deposit tracking with DB-backed action log
+- **LI.FI Widget**: Frontend component (`LiFiDepositDialog.tsx`) for user-initiated cross-chain deposits
+- **Worker integration**: 5-minute loop polls in-flight LI.FI actions and updates status
+- **Paymaster**: All agent-executed bridge transactions on Base use Coinbase Paymaster — agent never needs ETH

@@ -67,3 +67,20 @@ class ChatEvent(BaseModel):
     conversationId: str
     eventType: str
     content: str | JsonObject
+
+
+class CrossChainAction(BaseModel):
+    crossChainActionId: int
+    createdDate: datetime.datetime
+    updatedDate: datetime.datetime
+    agentId: str
+    actionType: str
+    fromChain: int
+    toChain: int
+    fromToken: str
+    toToken: str
+    amount: str
+    txHash: str | None
+    bridgeName: str | None
+    status: str
+    details: JsonObject

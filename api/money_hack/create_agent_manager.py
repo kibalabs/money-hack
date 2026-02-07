@@ -18,6 +18,8 @@ from money_hack.agent.tools import GetPositionTool
 from money_hack.agent.tools import GetPriceAnalysisTool
 from money_hack.agent.tools import SetTargetLtvTool
 from money_hack.agent_manager import AgentManager
+from money_hack.cross_chain_yield_manager import CrossChainManager
+from money_hack.external.lifi_client import LiFiClient
 from money_hack.blockchain_data.alchemy_client import AlchemyClient
 from money_hack.blockchain_data.blockscout_client import BlockscoutClient
 from money_hack.blockchain_data.findblock_client import FindBlockClient
@@ -125,6 +127,12 @@ def create_agent_manager() -> AgentManager:
             databaseStore=databaseStore,
         )
 
+    lifiClient = LiFiClient(requester=requester)
+    crossChainManager = CrossChainManager(
+        lifiClient=lifiClient,
+        databaseStore=databaseStore,
+    )
+
     agentManager = AgentManager(
         requester=requester,
         chainId=BASE_CHAIN_ID,
@@ -146,5 +154,7 @@ def create_agent_manager() -> AgentManager:
         notificationService=notificationService,
         priceIntelligenceService=priceIntelligenceService,
         mainnetEthClient=mainnetEthClient,
+        lifiClient=lifiClient,
+        crossChainManager=crossChainManager,
     )
     return agentManager
