@@ -42,10 +42,10 @@ const formatAmount = (amount: bigint, decimals: number): string => {
   return value.toLocaleString('en-US', { maximumFractionDigits: 2 });
 };
 
-const getHealthStatus = (ltv: number, maxLtv: number): 'healthy' | 'warning' | 'danger' => {
+const getHealthStatus = (ltv: number, maxLtv: number, canAgentManage: boolean): 'healthy' | 'warning' | 'danger' => {
   const ratio = ltv / maxLtv;
-  if (ratio >= 0.95) return 'danger';
-  if (ratio >= 0.85) return 'warning';
+  if (ratio >= 0.95) return canAgentManage ? 'warning' : 'danger';
+  if (ratio >= 0.85) return canAgentManage ? 'healthy' : 'warning';
   return 'healthy';
 };
 
@@ -62,7 +62,8 @@ export function PositionDashboard(props: IPositionDashboardProps): React.ReactEl
   }, [props.marketData, props.position.collateralAsset.address]);
 
   const maxLtv = collateralMarket?.maxLtv ?? 0.86;
-  const healthStatus = getHealthStatus(props.position.currentLtv, maxLtv);
+  const canAgentManage = props.position.vaultBalanceUsd > 0 && props.position.walletUsdcBalance === 0n;
+  const healthStatus = getHealthStatus(props.position.currentLtv, maxLtv, canAgentManage);
   const healthPercent = getHealthPercent(props.position.currentLtv, maxLtv);
 
   const borrowApy = collateralMarket?.borrowApy ?? 0;

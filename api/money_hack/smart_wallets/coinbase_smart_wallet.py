@@ -248,5 +248,5 @@ class CoinbaseSmartWallet(SmartWallet):
         return chain_util.encode_transaction_data_by_name(
             contractAbi=COINBASE_SMART_WALLET_ABI,
             functionName='executeBatch',
-            arguments={'calls': [{'target': call.toAddress, 'value': call.value, 'data': call.data} for call in calls]},
+            arguments={'calls': [(call.toAddress, call.value, bytes.fromhex(call.data.removeprefix('0x'))) for call in calls]},
         )

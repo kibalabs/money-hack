@@ -259,48 +259,6 @@ export function AgentPage(): React.ReactElement {
               <Stack.Item growthFactor={1} shrinkFactor={1} />
               <Text variant='note'>{constitution.ensName}</Text>
             </Stack>
-            <Spacing variant={PaddingSize.Narrow} />
-            <div className='rateComparison'>
-              <div className='rateRow'>
-                <Text>Max LTV</Text>
-                <Text variant='bold'>{constitution.maxLtv != null ? `${(constitution.maxLtv * 100).toFixed(0)}%` : 'Not set'}</Text>
-              </div>
-              <div className='rateRow'>
-                <Text>Min Spread</Text>
-                <Text variant='bold'>{constitution.minSpread != null ? `${(constitution.minSpread * 100).toFixed(2)}%` : 'Not set'}</Text>
-              </div>
-              <div className='rateRow'>
-                <Text>Max Position</Text>
-                <Text variant='bold'>{constitution.maxPositionUsd != null ? `$${constitution.maxPositionUsd.toLocaleString()}` : 'Not set'}</Text>
-              </div>
-              <div className='rateRow'>
-                <Text>Pause</Text>
-                <Text variant={constitution.pause ? 'bold-error' : 'bold-success'}>{constitution.pause ? 'PAUSED' : 'Active'}</Text>
-              </div>
-            </div>
-            {constitution.status && (
-              <React.Fragment>
-                <Spacing variant={PaddingSize.Narrow} />
-                <Stack direction={Direction.Horizontal} shouldAddGutters={true}>
-                  <Text variant='note'>
-                    {'Status: '}
-                    {constitution.status}
-                  </Text>
-                  {constitution.lastCheck && (
-                    <Text variant='note'>
-                      {'Last check: '}
-                      {new Date(constitution.lastCheck).toLocaleTimeString()}
-                    </Text>
-                  )}
-                </Stack>
-                {constitution.lastAction && (
-                  <Text variant='note'>
-                    {'Last action: '}
-                    {constitution.lastAction}
-                  </Text>
-                )}
-              </React.Fragment>
-            )}
           </Stack>
         </Box>
       )}

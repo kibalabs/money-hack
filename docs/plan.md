@@ -94,8 +94,6 @@ BorrowBot is an autonomous agent on **Base** that manages overcollateralized loa
 
 * **Outcome**: All position values (collateral, borrow, vault, wallet balances) are fetched live from on-chain. Dropped `collateralAmount`, `borrowAmount`, and `vaultShares` columns from the DB. Dashboard redesigned to show net position value, idle wallet assets, assets vs debt breakdown, and close-position cost.
 
----
-
 ### ✅ Phase 18: ENS as the Agent's On-Chain Constitution
 
 * **Outcome**: ENS text records on Base L2 (Basenames) serve as a decentralized governance layer. Owners set guardrails (`com.borrowbot.max-ltv`, `com.borrowbot.min-spread`, `com.borrowbot.pause`, etc.) via ENS, and the agent reads its constitution before every action cycle. The agent writes status back (`com.borrowbot.status`, `com.borrowbot.last-action`, `com.borrowbot.last-check`). Fixed critical `namehash()` bug (was NIST SHA-3, now keccak256). Frontend constitution panel on AgentPage. Targets ETHGlobal "Most Creative Use of ENS for DeFi" prize.
