@@ -63,6 +63,14 @@ export class MoneyHackClient extends ServiceClient {
     return response;
   };
 
+  public getWithdrawPreview = async (userAddress: string, amount: bigint, authToken: string): Promise<Resources.WithdrawPreview> => {
+    const method = RestMethod.POST;
+    const path = `v1/users/${userAddress}/position/withdraw/preview`;
+    const request = new Endpoints.WithdrawPreviewRequest(amount.toString());
+    const response = await this.makeRequest(method, path, request, Endpoints.WithdrawPreviewResponse, this.getHeaders(authToken));
+    return response.preview;
+  };
+
   public getClosePositionTransactions = async (userAddress: string, authToken: string): Promise<Endpoints.ClosePositionResponse> => {
     const method = RestMethod.POST;
     const path = `v1/users/${userAddress}/position/close`;

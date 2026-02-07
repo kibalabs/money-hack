@@ -60,6 +60,14 @@ class WithdrawResponse(BaseModel):
     vault_address: str
 
 
+class WithdrawPreviewRequest(BaseModel):
+    amount: str
+
+
+class WithdrawPreviewResponse(BaseModel):
+    preview: resources.WithdrawPreview
+
+
 class ClosePositionRequest(BaseModel):
     pass
 

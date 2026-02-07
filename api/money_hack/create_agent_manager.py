@@ -15,7 +15,9 @@ from money_hack.agent.gemini_llm import GeminiLLM
 from money_hack.agent.tools import GetActionHistoryTool
 from money_hack.agent.tools import GetMarketDataTool
 from money_hack.agent.tools import GetPositionTool
+from money_hack.agent.tools import GetPriceAnalysisTool
 from money_hack.agent.tools import SetTargetLtvTool
+from money_hack.blockchain_data.price_intelligence_service import PriceIntelligenceService
 from money_hack.agent_manager import AgentManager
 from money_hack.blockchain_data.alchemy_client import AlchemyClient
 from money_hack.blockchain_data.blockscout_client import BlockscoutClient
@@ -90,11 +92,13 @@ def create_agent_manager() -> AgentManager:
     databaseStore = DatabaseStore(database=database)
     geminiLlm = GeminiLLM(apiKey=GEMINI_API_KEY, requester=requester) if GEMINI_API_KEY else None
     chatHistoryStore = ChatHistoryStore(database=database)
+    priceIntelligenceService = PriceIntelligenceService(alchemyClient=alchemyClient, requester=requester)
     chatTools: list[ChatTool[Any, Any]] = [  # type: ignore[explicit-any]
         GetPositionTool(),
         GetMarketDataTool(),
         GetActionHistoryTool(),
         SetTargetLtvTool(),
+        GetPriceAnalysisTool(),
     ]
     chatBot = ChatBot(llm=geminiLlm, historyStore=chatHistoryStore, tools=chatTools) if geminiLlm else None
 
@@ -111,6 +115,8 @@ def create_agent_manager() -> AgentManager:
             morphoClient=morphoClient,
             alchemyClient=alchemyClient,
             databaseStore=databaseStore,
+            priceIntelligenceService=priceIntelligenceService,
+            fortyAcresClient=fortyAcresClient,
         )
         notificationService = NotificationService(
             telegramClient=telegramClient,
@@ -136,5 +142,6 @@ def create_agent_manager() -> AgentManager:
         chatHistoryStore=chatHistoryStore,
         ltvManager=ltvManager,
         notificationService=notificationService,
+        priceIntelligenceService=priceIntelligenceService,
     )
     return agentManager

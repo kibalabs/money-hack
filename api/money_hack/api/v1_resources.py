@@ -36,6 +36,10 @@ class Position(BaseModel):
     accrued_yield_usd: float
     estimated_apy: float
     status: str
+    wallet_collateral_balance: str
+    wallet_collateral_balance_usd: float
+    wallet_usdc_balance: str
+    wallet_usdc_balance_usd: float
 
 
 class UserConfig(BaseModel):
@@ -84,6 +88,20 @@ class WithdrawTransactionsData(BaseModel):
     transactions: list[TransactionCall]
     withdraw_amount: str
     vault_address: str
+
+
+class WithdrawPreview(BaseModel):
+    withdraw_amount: str
+    vault_balance: str
+    max_safe_withdraw: str
+    current_ltv: float
+    estimated_new_ltv: float
+    target_ltv: float
+    max_ltv: float
+    hard_max_ltv: float
+    is_warning: bool
+    is_blocked: bool
+    warning_message: str | None = None
 
 
 class ClosePositionTransactionsData(BaseModel):

@@ -1,7 +1,7 @@
 import React from 'react';
 
 import { dateToString } from '@kibalabs/core';
-import { Alignment, Box, Direction, KibaIcon, Stack, Text } from '@kibalabs/ui-react';
+import { Box, Text } from '@kibalabs/ui-react';
 
 import { Agent, AgentAction } from '../client/resources';
 

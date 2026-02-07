@@ -11,8 +11,6 @@ from money_hack.store.entity_repository import EntityRepository
 
 metadata = sqlalchemy.MetaData()
 
-BigInt = sqlalchemy.Numeric(precision=78, scale=0)
-
 UsersTable = sqlalchemy.Table(
     'tbl_users',
     metadata,
@@ -68,10 +66,7 @@ AgentPositionsTable = sqlalchemy.Table(
     sqlalchemy.Column(key='updatedDate', name='updated_date', type_=sqlalchemy.DateTime, nullable=False),
     sqlalchemy.Column(key='agentId', name='agent_id', type_=sqlalchemy_psql.UUID, nullable=False, index=True),
     sqlalchemy.Column(key='collateralAsset', name='collateral_asset', type_=sqlalchemy.Text, nullable=False),
-    sqlalchemy.Column(key='collateralAmount', name='collateral_amount', type_=BigInt, nullable=False),
-    sqlalchemy.Column(key='borrowAmount', name='borrow_amount', type_=BigInt, nullable=False),
     sqlalchemy.Column(key='targetLtv', name='target_ltv', type_=sqlalchemy.Float, nullable=False),
-    sqlalchemy.Column(key='vaultShares', name='vault_shares', type_=BigInt, nullable=False),
     sqlalchemy.Column(key='morphoMarketId', name='morpho_market_id', type_=sqlalchemy.Text, nullable=False),
     sqlalchemy.Column(key='status', name='status', type_=sqlalchemy.Text, nullable=False),
 )

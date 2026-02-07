@@ -78,107 +78,69 @@ BorrowBot is an autonomous agent on **Base** that manages overcollateralized loa
 
 * **Goal**: A production-grade background process that monitors positions, autonomously fixes health issues, and communicates proactively.
 
-#### Autonomous Actions
-1. **Self-Healing**: If LTV > Target/Critical, check available funds in Yield Vault.
-    - **If sufficient**: Automatically withdraw from vault and repay debt to restore target LTV. Log action.
-    - **If insufficient**: Mark as "User Action Required" and send urgent alert.
-
-#### Communication Triggers
-- **Action Taken** (Telegram): "I detected High LTV and automatically withdrew $X from yield vault to repay debt. Position is now healthy at Y% LTV."
-- **Urgent** (Telegram): "Critical Risk: LTV is high and yield balance is insufficient to fix it. Please deposit more collateral immediately."
-- **Daily Digest** (Telegram): "Everything is healthy. Earned $X today. Current LTV Y%. No action needed."
-
-#### Implementation
-- Cron job every 5 minutes checks all active positions
-- Logic flow: Check Health -> Try Self-Heal -> Alert if failed
-- Daily Summary: Run once per day per user (store last_daily_digest timestamp in `tbl_agent_actions` or similar)
-- Rate limit alerts: Avoid spamming if user hasn't acted yet (e.g., remind every 4 hours for critical)
-
-### 🔲 Phase 14: Agent Thoughts (Live Stream UI)
+### ✅ Phase 14: Agent Thoughts (Live Stream UI)
 
 * **Goal**: Show the agent's reasoning process in real-time to make it feel alive and intelligent.
 
-#### UI Design
-- New `/agent/thoughts` page or expandable panel on AgentPage
-- Live feed of agent observations and decisions
-- Entries: timestamp, thought type (observation/decision/action), content
-- Auto-scroll, typewriter effect for new entries
-
-#### Thought Categories
-1. **Observations**: "Checking your position... LTV is 72.3%, healthy ✓"
-2. **Analysis**: "ETH dropped 3% in the last hour. Monitoring closely."
-3. **Decisions**: "LTV within target range, no action needed."
-4. **Actions**: "Executing auto-repay: withdrawing $50 from vault to reduce debt."
-
-#### Implementation
-- Backend: Log thoughts to `tbl_agent_thoughts` during background worker runs
-- Thoughts are pre-templated strings with variable interpolation (minimal LLM cost)
-- Only use LLM for user-facing messages, not internal thoughts
-- Frontend: Poll `/thoughts` endpoint or use SSE for live updates
-- Show last 24 hours of thoughts, paginated
-
-### 🔲 Phase 15: USDC Withdrawals
+### ✅ Phase 15: USDC Withdrawals
 
 * **Goal**: Allow users to withdraw earned USDC from the vault while maintaining position safety.
-
-#### Safety Logic
-- Calculate max safe withdrawal: `vault_balance - buffer_for_repay`
-- If withdrawal would push LTV above 85%: block with explanation
-- If withdrawal pushes LTV above target: warn user, require confirmation
-- If withdrawal pushes LTV above 80%: urgent warning, require explicit "I understand" confirmation
-
-#### Post-Withdrawal Behavior
-- Background worker increases monitoring frequency for risky positions
-- Immediate LTV recalculation after withdrawal
-- If LTV critical: send urgent Telegram message
-- Auto-repay may trigger if LTV exceeds safe threshold
-
-#### Implementation
-- `POST /v1/users/{addr}/withdraw` with amount
-- Return transaction calldata for vault withdrawal
-- Frontend: withdrawal dialog with LTV impact preview
-- Show estimated new LTV, health factor after withdrawal
 
 ### 🔲 Phase 16: Auto-Optimizer (Yield Maximizer)
 
 * **Goal**: Safely increase leverage when LTV is low to maximize capital efficiency ("Looping").
 
-#### Logic
-1. **Trigger**: `Current LTV` < `Target LTV - Buffer` (e.g., Target 70%, Current 60%).
-2. **Action**:
-   - Calculate amount to borrow to return to Target LTV.
-   - Borrow USDC against existing collateral.
-   - Deposit borrowed USDC into Yield Vault immediately.
-3. **Constraint**: Only execute if `Expected Yield > Borrow Cost + Gas Fees`.
-
-#### Safety
-- **Volatility Check**: Do not optimize if price has moved > 2% in last hour.
-- **Minimum Size**: Do not optimize for trivial amounts (< $100 gain).
-- **User Control**: Feature must be explicitly enabled by user (`enable_auto_optimize` = True). Default is OFF.
-
-#### Communication
-- **Notification**: "Market moved in your favor. I borrowed $X more and deposited it to earn yield. Expected extra profit: $Y/year."
+#### Implementation
+- **Trigger**: In `LtvManager.check_position_ltv()`, when `currentLtv < targetLtv - 0.05` (existing auto_borrow), add profitability & volatility gates before executing.
+- **Profitability gate**: Fetch yield APY and borrow APY, only optimize if `spread > 0` and projected annual gain > $100.
+- **Volatility gate**: Use `PriceIntelligenceService` (Phase 16B) — suppress if 1h price change > 2% or 24h volatility (stddev) is elevated.
+- **Always on**: No user toggle — optimization runs automatically for all positions when conditions are met.
+- **Execution**: Reuses existing `build_auto_borrow_transactions()` — no new on-chain logic needed.
+- **Notification**: `send_auto_optimize_success()` — includes borrow amount, new LTV, estimated extra yield/year, and price context.
 
 ---
 
-### 🔲 Phase 17: ENS Basescan Labels
+### 🔲 Phase 16B: Historical Price Intelligence
+
+* **Goal**: Give the agent historical price data to improve rebalancing and optimization decisions.
+
+#### Implementation
+- **Data source**: Alchemy Historical Prices API (already integrated in `AlchemyClient`) — no new API keys or subgraph needed.
+- **New service**: `PriceIntelligenceService` in `blockchain_data/price_intelligence_service.py`.
+  - `get_price_analysis(chainId, assetAddress)` → `PriceAnalysis` dataclass with: current price, 1h/24h/7d change %, 24h volatility (stddev of hourly samples), trend direction.
+  - Uses Alchemy `tokens/historical` endpoint with hourly intervals for 24h and daily intervals for 7d.
+  - In-memory cache (15 min TTL) to avoid repeated API calls.
+- **New AI tool**: `GetPriceAnalysisTool` — agent can call `get_price_analysis(asset)` to get a structured price summary for chat responses.
+- **Integration**: `LtvManager` receives `PriceIntelligenceService` and calls it during auto-optimize checks. Notifications include price context.
+
+---
+
+### 🔲 Phase 17: On-Chain Position Truth (Remove Stored Holdings)
+
+* **Goal**: Always show live on-chain values for collateral, borrow, and vault balances — never rely on stale DB values.
+
+#### Problem
+`collateralAmount`, `borrowAmount`, and `vaultShares` are stored in `tbl_agent_positions` at creation/transaction time and only partially updated. When a user deposits collateral directly to the agent or external state changes occur (partial liquidation, interest accrual), the UI shows stale values.
+
+#### Implementation
+- **On-chain fetch**: Call Morpho Blue's `position(marketId, agentWallet)` contract function (already in `MORPHO_BLUE_ABI` but never called) to get live `collateral` and `borrowShares`. Call the vault's `balanceOf` + `convertToAssets` for live vault balance (already partially done via `_get_actual_vault_balance`).
+- **Remove stored holdings**: Drop `collateralAmount`, `borrowAmount`, and `vaultShares` columns from `tbl_agent_positions`. Keep only: `agentId`, `collateralAsset`, `targetLtv`, `morphoMarketId`, `status`, timestamps.
+- **New method**: Add `get_onchain_position(agentWallet, marketId)` to fetch collateral amount, borrow shares, and convert borrow shares to USDC amount using Morpho's `market()` function for the interest index.
+- **Update `get_position()`**: Replace DB reads of collateral/borrow/vault with on-chain calls. Cache result briefly (e.g., 30s) to avoid redundant RPC calls.
+- **Update `LtvManager`**: Use on-chain values for LTV calculation and rebalancing decisions instead of DB values.
+- **Update transaction flows**: After deposit/borrow/repay/withdraw, no longer need to update holdings in DB — just invalidate cache.
+- **Migration**: Alembic migration to drop the three columns.
+
+---
+
+### 🔲 Phase 18: ENS Basescan Labels
 
 * **Goal**: Configure reverse resolution so agent wallets display their ENS name on block explorers.
 
-### 🔲 Phase 18: Uniswap Integration
+### 🔲 Phase 19: Uniswap Integration
 
 * **Goal**: Expand asset support by using Uniswap for automated swaps between collateral types and yield rewards.
 
-### 🔲 Phase 19: Agent Wallet & Security (Stretch)
+### 🔲 Phase 20: Agent Wallet & Security (Stretch)
 
 * **Goal**: Use ERC-4337 smart wallets to restrict agent permissions to only approved protocol adapters.
-
----
-
-## 🤖 AI Interaction Design
-
-* **Engine**: Google Gemini via a non-streaming and streaming API.
-* **Capabilities**: The agent can read position data, fetch market rates, view its own action history, and execute one write action: **updating the target LTV**.
-* **Context**: The agent is programmed to never guess values and always use its tool-calling suite for real-time data.
-
-**Would you like me to expand on the "Next Steps" (Phases 12-14) with specific technical requirements?**

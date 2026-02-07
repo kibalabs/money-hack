@@ -5,10 +5,13 @@ import { Alignment, Box, Button, Direction, PaddingSize, Spacing, Stack, Text } 
 import { useToastManager } from '@kibalabs/ui-react-toast';
 
 import { useAuth } from '../AuthContext';
-import { Agent, AgentAction, ChatMessage, MarketData, Position } from '../client/resources';
+import { Agent, AgentAction, ChatMessage, MarketData, Position, Wallet } from '../client/resources';
 import { AgentTerminal } from '../components/AgentTerminal';
+import { DepositDialog } from '../components/DepositDialog';
+import { DepositUsdcDialog } from '../components/DepositUsdcDialog';
 import { FloatingChat } from '../components/FloatingChat';
 import { PositionDashboard } from '../components/PositionDashboard';
+import { WithdrawDialog } from '../components/WithdrawDialog';
 import { useGlobals } from '../GlobalsContext';
 
 export function AgentPage(): React.ReactElement {
@@ -20,10 +23,14 @@ export function AgentPage(): React.ReactElement {
   const [position, setPosition] = React.useState<Position | null>(null);
   const [marketData, setMarketData] = React.useState<MarketData | null>(null);
   const [agent, setAgent] = React.useState<Agent | null>(null);
+  const [wallet, setWallet] = React.useState<Wallet | null>(null);
   const [agentActions, setAgentActions] = React.useState<AgentAction[]>([]);
   const [isLoading, setIsLoading] = React.useState<boolean>(true);
   const [isLoadingActions, setIsLoadingActions] = React.useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = React.useState<boolean>(false);
+  const [isWithdrawDialogOpen, setIsWithdrawDialogOpen] = React.useState<boolean>(false);
+  const [isDepositDialogOpen, setIsDepositDialogOpen] = React.useState<boolean>(false);
+  const [isDepositUsdcDialogOpen, setIsDepositUsdcDialogOpen] = React.useState<boolean>(false);
   const hasLoadedRef = React.useRef<boolean>(false);
   const [conversationId, setConversationId] = useLocalStorageState(`borrowbot-${accountAddress || 'default'}-conversationId`, localStorageClient);
 
@@ -53,6 +60,13 @@ export function AgentPage(): React.ReactElement {
       setPosition(fetchedPosition);
       setMarketData(fetchedMarketData);
       setAgent(fetchedAgent);
+      // Fetch wallet balance for deposit functionality
+      try {
+        const fetchedWallet = await moneyHackClient.getWallet(accountAddress, authToken);
+        setWallet(fetchedWallet);
+      } catch (walletError) {
+        console.error('Failed to load wallet:', walletError);
+      }
     } catch (error) {
       console.error('Failed to load position:', error);
       toastManager.showTextToast('Failed to load position data', 'error');
@@ -108,8 +122,49 @@ export function AgentPage(): React.ReactElement {
   }, [loadData]);
 
   const handleWithdrawClicked = React.useCallback((): void => {
-    toastManager.showTextToast('Withdraw functionality coming soon', 'info');
-  }, [toastManager]);
+    setIsWithdrawDialogOpen(true);
+  }, []);
+
+  const handleDepositClicked = React.useCallback((): void => {
+    setIsDepositDialogOpen(true);
+  }, []);
+
+  const handleDepositUsdcClicked = React.useCallback((): void => {
+    setIsDepositUsdcDialogOpen(true);
+  }, []);
+
+  const handleWithdrawConfirmed = React.useCallback(async (amount: bigint): Promise<void> => {
+    if (!accountAddress || !authToken) return;
+    try {
+      await moneyHackClient.getWithdrawTransactions(accountAddress, amount, authToken);
+      toastManager.showTextToast('Withdrawal submitted successfully', 'success');
+      setIsWithdrawDialogOpen(false);
+      loadData(false);
+    } catch (error) {
+      console.error('Withdrawal failed:', error);
+      toastManager.showTextToast('Withdrawal failed. Please try again.', 'error');
+      setIsWithdrawDialogOpen(false);
+    }
+  }, [accountAddress, authToken, moneyHackClient, toastManager, loadData]);
+
+  const handleDepositSuccess = React.useCallback((): void => {
+    setIsDepositDialogOpen(false);
+    loadData(false);
+  }, [loadData]);
+
+  const handleDepositUsdcSuccess = React.useCallback((): void => {
+    setIsDepositUsdcDialogOpen(false);
+    loadData(false);
+  }, [loadData]);
+
+  const latestCriticalMessage = React.useMemo((): string | null => {
+    const criticalAction = agentActions.find(
+      (a) => a.actionType === 'notification'
+        && (a.value === 'critical_ltv_warning' || a.value === 'insufficient_vault_warning'),
+    );
+    if (!criticalAction) return null;
+    return (criticalAction.details as Record<string, unknown>)?.message as string ?? null;
+  }, [agentActions]);
 
   const handleClosePositionClicked = React.useCallback((): void => {
     toastManager.showTextToast('Close position functionality coming soon', 'info');
@@ -178,10 +233,14 @@ export function AgentPage(): React.ReactElement {
       <PositionDashboard
         position={position}
         marketData={marketData}
+        agent={agent}
         onRefreshClicked={handleRefreshClicked}
+        onDepositClicked={handleDepositClicked}
+        onDepositUsdcClicked={handleDepositUsdcClicked}
         onWithdrawClicked={handleWithdrawClicked}
         onClosePositionClicked={handleClosePositionClicked}
         isRefreshing={isRefreshing}
+        latestCriticalMessage={latestCriticalMessage}
       />
 
       <Box maxWidth='600px' isFullWidth={true} style={{ marginTop: '32px' }}>
@@ -205,6 +264,34 @@ export function AgentPage(): React.ReactElement {
           <Button text='Disconnect' variant='tertiary-small' onClicked={logout} />
         </Stack>
       </Box>
+
+      {isWithdrawDialogOpen && position && (
+        <WithdrawDialog
+          position={position}
+          onCloseClicked={(): void => setIsWithdrawDialogOpen(false)}
+          onWithdrawConfirmed={handleWithdrawConfirmed}
+        />
+      )}
+
+      {isDepositDialogOpen && position && wallet && agent && (
+        <DepositDialog
+          position={position}
+          agentWalletAddress={agent.walletAddress}
+          availableBalance={wallet.assetBalances.find((b) => b.assetAddress.toLowerCase() === position.collateralAsset.address.toLowerCase())?.balance || 0n}
+          onCloseClicked={(): void => setIsDepositDialogOpen(false)}
+          onDepositSuccess={handleDepositSuccess}
+        />
+      )}
+
+      {isDepositUsdcDialogOpen && position && wallet && agent && (
+        <DepositUsdcDialog
+          position={position}
+          agentWalletAddress={agent.walletAddress}
+          availableUsdcBalance={wallet.assetBalances.find((b) => b.assetAddress.toLowerCase() === '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913')?.balance || 0n}
+          onCloseClicked={(): void => setIsDepositUsdcDialogOpen(false)}
+          onDepositSuccess={handleDepositUsdcSuccess}
+        />
+      )}
 
       {agent && (
         <FloatingChat

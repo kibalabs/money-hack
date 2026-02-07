@@ -88,12 +88,19 @@ def create_v1_routes(agentManager: AgentManager) -> list[Route]:
     @authorize_signature(authorizer=agentManager)
     async def withdraw_usdc(request: KibaApiRequest[endpoints.WithdrawRequest]) -> endpoints.WithdrawResponse:
         userAddress = request.path_params.get('userAddress', '')
-        withdrawData = await agentManager.get_withdraw_transactions(user_address=userAddress, amount=request.data.amount)
+        withdrawData = await agentManager.execute_withdraw(user_address=userAddress, amount=request.data.amount)
         return endpoints.WithdrawResponse(
             transactions=withdrawData.transactions,
             withdraw_amount=withdrawData.withdraw_amount,
             vault_address=withdrawData.vault_address,
         )
+
+    @json_route(requestType=endpoints.WithdrawPreviewRequest, responseType=endpoints.WithdrawPreviewResponse)
+    @authorize_signature(authorizer=agentManager)
+    async def withdraw_preview(request: KibaApiRequest[endpoints.WithdrawPreviewRequest]) -> endpoints.WithdrawPreviewResponse:
+        userAddress = request.path_params.get('userAddress', '')
+        preview = await agentManager.get_withdraw_preview(user_address=userAddress, amount=request.data.amount)
+        return endpoints.WithdrawPreviewResponse(preview=preview)
 
     @json_route(requestType=endpoints.ClosePositionRequest, responseType=endpoints.ClosePositionResponse)
     @authorize_signature(authorizer=agentManager)
@@ -252,6 +259,7 @@ def create_v1_routes(agentManager: AgentManager) -> list[Route]:
         Route('/v1/users/{userAddress:str}/position', endpoint=create_position, methods=['POST']),
         Route('/v1/users/{userAddress:str}/position/transactions', endpoint=get_position_transactions, methods=['POST']),
         Route('/v1/users/{userAddress:str}/position/withdraw', endpoint=withdraw_usdc, methods=['POST']),
+        Route('/v1/users/{userAddress:str}/position/withdraw/preview', endpoint=withdraw_preview, methods=['POST']),
         Route('/v1/users/{userAddress:str}/position/close', endpoint=close_position, methods=['POST']),
         Route('/v1/users/{userAddress:str}/telegram/login-url', endpoint=get_telegram_login_url, methods=['GET']),
         Route('/v1/users/{userAddress:str}/telegram/secret-verify', endpoint=telegram_secret_verify, methods=['POST']),

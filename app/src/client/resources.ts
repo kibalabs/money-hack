@@ -43,6 +43,10 @@ export class Position {
     readonly accruedYieldUsd: number,
     readonly estimatedApy: number,
     readonly status: string,
+    readonly walletCollateralBalance: bigint,
+    readonly walletCollateralBalanceUsd: number,
+    readonly walletUsdcBalance: bigint,
+    readonly walletUsdcBalanceUsd: number,
   ) { }
 
   public static fromObject = (obj: RawObject): Position => {
@@ -64,6 +68,10 @@ export class Position {
       Number(obj.accrued_yield_usd),
       Number(obj.estimated_apy),
       String(obj.status),
+      BigInt(obj.wallet_collateral_balance as string),
+      Number(obj.wallet_collateral_balance_usd),
+      BigInt(obj.wallet_usdc_balance as string),
+      Number(obj.wallet_usdc_balance_usd),
     );
   };
 }
@@ -168,6 +176,38 @@ export class TransactionCall {
       String(obj.to),
       String(obj.data),
       String(obj.value || '0'),
+    );
+  };
+}
+
+export class WithdrawPreview {
+  public constructor(
+    readonly withdrawAmount: bigint,
+    readonly vaultBalance: bigint,
+    readonly maxSafeWithdraw: bigint,
+    readonly currentLtv: number,
+    readonly estimatedNewLtv: number,
+    readonly targetLtv: number,
+    readonly maxLtv: number,
+    readonly hardMaxLtv: number,
+    readonly isWarning: boolean,
+    readonly isBlocked: boolean,
+    readonly warningMessage: string | null,
+  ) { }
+
+  public static fromObject = (obj: RawObject): WithdrawPreview => {
+    return new WithdrawPreview(
+      BigInt(obj.withdraw_amount as string),
+      BigInt(obj.vault_balance as string),
+      BigInt(obj.max_safe_withdraw as string),
+      Number(obj.current_ltv),
+      Number(obj.estimated_new_ltv),
+      Number(obj.target_ltv),
+      Number(obj.max_ltv),
+      Number(obj.hard_max_ltv),
+      Boolean(obj.is_warning),
+      Boolean(obj.is_blocked),
+      obj.warning_message ? String(obj.warning_message) : null,
     );
   };
 }

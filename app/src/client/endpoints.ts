@@ -178,6 +178,34 @@ export class WithdrawResponse extends ResponseData {
   };
 }
 
+export class WithdrawPreviewRequest extends RequestData {
+  public constructor(
+    readonly amount: string,
+  ) {
+    super();
+  }
+
+  public toObject = (): RawObject => {
+    return {
+      amount: this.amount,
+    };
+  };
+}
+
+export class WithdrawPreviewResponse extends ResponseData {
+  public constructor(
+    readonly preview: Resources.WithdrawPreview,
+  ) {
+    super();
+  }
+
+  public static fromObject = (obj: RawObject): WithdrawPreviewResponse => {
+    return new WithdrawPreviewResponse(
+      Resources.WithdrawPreview.fromObject(obj.preview as RawObject),
+    );
+  };
+}
+
 export class ClosePositionRequest extends RequestData {
   public constructor() {
     super();

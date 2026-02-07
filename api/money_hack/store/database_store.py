@@ -155,20 +155,14 @@ class DatabaseStore:
         self,
         agentId: str,
         collateralAsset: str,
-        collateralAmount: int,
-        borrowAmount: int,
         targetLtv: float,
-        vaultShares: int,
         morphoMarketId: str,
     ) -> AgentPosition:
         return await AgentPositionsRepository.create(
             database=self.database,
             agentId=agentId,
             collateralAsset=collateralAsset,
-            collateralAmount=collateralAmount,
-            borrowAmount=borrowAmount,
             targetLtv=targetLtv,
-            vaultShares=vaultShares,
             morphoMarketId=morphoMarketId,
             status='active',
         )
@@ -176,20 +170,18 @@ class DatabaseStore:
     async def update_position(
         self,
         agentPositionId: int,
-        collateralAmount: int | None = None,
-        borrowAmount: int | None = None,
         targetLtv: float | None = None,
-        vaultShares: int | None = None,
         status: str | None = None,
     ) -> AgentPosition:
+        kwargs: dict[str, object] = {'agentPositionId': agentPositionId}
+        if targetLtv is not None:
+            kwargs['targetLtv'] = targetLtv
+        if status is not None:
+            kwargs['status'] = status
         return await AgentPositionsRepository.update(
             database=self.database,
-            agentPositionId=agentPositionId,
-            collateralAmount=collateralAmount,
-            borrowAmount=borrowAmount,
-            targetLtv=targetLtv,
-            vaultShares=vaultShares,
-            status=status,
+            connection=None,
+            **kwargs,
         )
 
     async def log_agent_action(

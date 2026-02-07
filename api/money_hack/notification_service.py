@@ -127,6 +127,70 @@ class NotificationService:
         await self._log_notification(agentId=agent.agentId, notificationType='auto_repay_success', message=f'Auto-repay executed: ${repayAmount:.2f}. LTV {oldLtv:.1%} -> {newLtv:.1%}', success=success)
         return success
 
+    async def send_auto_borrow_success(
+        self,
+        agent: Agent,
+        user: User,
+        borrowAmount: float,
+        oldLtv: float,
+        newLtv: float,
+    ) -> bool:
+        """Send notification when auto-borrow is executed to increase yield."""
+        if not user.telegramChatId:
+            return False
+        message = f'Your LTV was low ({oldLtv:.1%}), so I borrowed an additional ${borrowAmount:.2f} USDC and deposited it into the yield vault to maximize your earnings. Your LTV is now {newLtv:.1%}, back on target.'
+        success = await self.telegramClient.send_message(chatId=user.telegramChatId, text=message)
+        await self._log_notification(agentId=agent.agentId, notificationType='auto_borrow_success', message=f'Auto-borrow executed: ${borrowAmount:.2f}. LTV {oldLtv:.1%} -> {newLtv:.1%}', success=success)
+        return success
+
+    async def send_auto_optimize_success(
+        self,
+        agent: Agent,
+        user: User,
+        borrowAmount: float,
+        oldLtv: float,
+        newLtv: float,
+        priceContext: str | None = None,
+    ) -> bool:
+        """Send notification when auto-optimization (yield looping) is executed."""
+        if not user.telegramChatId:
+            return False
+        message = (
+            f'Market conditions are favorable, so I borrowed an additional ${borrowAmount:.2f} USDC '
+            f'and deposited it into the yield vault to maximize your earnings. '
+            f'LTV moved from {oldLtv:.1%} to {newLtv:.1%}.'
+        )
+        if priceContext:
+            message += f'\n\nMarket: {priceContext}'
+        success = await self.telegramClient.send_message(chatId=user.telegramChatId, text=message)
+        await self._log_notification(
+            agentId=agent.agentId,
+            notificationType='auto_optimize_success',
+            message=f'Auto-optimize executed: ${borrowAmount:.2f}. LTV {oldLtv:.1%} -> {newLtv:.1%}',
+            success=success,
+        )
+        return success
+
+    async def send_insufficient_vault_warning(
+        self,
+        agent: Agent,
+        user: User,
+        currentLtv: float,
+        maxLtv: float,
+        requiredAmount: float,
+    ) -> bool:
+        """Send warning when vault has insufficient funds for auto-repay (user withdrew USDC)."""
+        if not user.telegramChatId:
+            return False
+        message = (
+            f'⚠️ Your LTV is high ({currentLtv:.1%}, max: {maxLtv:.1%}) and I need ${requiredAmount:.2f} USDC to repay debt, '
+            f'but your yield vault balance is too low. It looks like USDC has been withdrawn. '
+            f'Please deposit more collateral or return USDC to restore your position health.'
+        )
+        success = await self.telegramClient.send_message(chatId=user.telegramChatId, text=message)
+        await self._log_notification(agentId=agent.agentId, notificationType='insufficient_vault_warning', message=f'Insufficient vault: need ${requiredAmount:.2f}, LTV {currentLtv:.1%}', success=success)
+        return success
+
     async def send_daily_digest(
         self,
         agent: Agent,

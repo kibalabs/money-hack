@@ -137,6 +137,13 @@ def encode_vault_withdraw(assets: int, receiver: str, owner: str) -> str:
     return str(encoded) if isinstance(encoded, (bytes, str)) else encoded
 
 
+def encode_vault_redeem(shares: int, receiver: str, owner: str) -> str:
+    contract = w3.eth.contract(abi=morpho_abis.ERC4626_VAULT_ABI)
+    fn = contract.functions.redeem(shares, Web3.to_checksum_address(receiver), Web3.to_checksum_address(owner))
+    encoded = fn._encode_transaction_data()  # noqa: SLF001
+    return str(encoded) if isinstance(encoded, (bytes, str)) else encoded
+
+
 class TransactionBuilder:
     def __init__(self, chainId: int, usdcAddress: str, yoVaultAddress: str) -> None:
         self.chainId = chainId
@@ -230,14 +237,14 @@ class TransactionBuilder:
     def build_withdraw_transactions(
         self,
         user_address: str,
-        withdraw_amount: int,
+        withdraw_shares: int,
     ) -> list[TransactionCall]:
-        """Build transactions to withdraw USDC from the vault (partial withdrawal, keeps position open)."""
+        """Build transactions to withdraw USDC from the vault by redeeming shares (partial withdrawal, keeps position open)."""
         user = chain_util.normalize_address(user_address)
         transactions: list[TransactionCall] = []
-        withdraw_calldata = encode_vault_withdraw(assets=withdraw_amount, receiver=user, owner=user)
-        transactions.append(TransactionCall(to=self.yoVaultAddress, data=withdraw_calldata))
-        logging.info(f'Added vault withdraw tx: {withdraw_amount} USDC from Yo vault')
+        redeem_calldata = encode_vault_redeem(shares=withdraw_shares, receiver=user, owner=user)
+        transactions.append(TransactionCall(to=self.yoVaultAddress, data=redeem_calldata))
+        logging.info(f'Added vault redeem tx: {withdraw_shares} shares from Yo vault')
         return transactions
 
     def build_close_position_transactions_from_market(
@@ -371,6 +378,22 @@ class TransactionBuilder:
         )
         transactions.append(TransactionCall(to=self.morphoAddress, data=repay_calldata))
         logging.info(f'Added repay tx: {repay_amount} USDC to Morpho')
+        return transactions
+
+    def build_vault_deposit_transactions(
+        self,
+        user_address: str,
+        deposit_amount: int,
+    ) -> list[TransactionCall]:
+        """Build transactions to deposit idle USDC into the Yo vault: approve USDC, then deposit."""
+        user = chain_util.normalize_address(user_address)
+        transactions: list[TransactionCall] = []
+        usdc_approve_calldata = encode_approve(self.yoVaultAddress, deposit_amount)
+        transactions.append(TransactionCall(to=self.usdcAddress, data=usdc_approve_calldata))
+        logging.info(f'Added USDC approval tx: USDC -> Yo vault for {deposit_amount}')
+        deposit_calldata = encode_vault_deposit(deposit_amount, user)
+        transactions.append(TransactionCall(to=self.yoVaultAddress, data=deposit_calldata))
+        logging.info(f'Added vault deposit tx: {deposit_amount} USDC to Yo vault')
         return transactions
 
     def build_auto_borrow_transactions_from_market(

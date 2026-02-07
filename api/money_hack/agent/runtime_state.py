@@ -19,3 +19,4 @@ class RuntimeState(BaseModel):  # type: ignore[explicit-any]
     databaseStore: DatabaseStore
     getMarketData: Callable[[], Coroutine[Any, Any, Any]]  # type: ignore[explicit-any]
     getPosition: Callable[[str], Coroutine[Any, Any, Any]]  # type: ignore[explicit-any]
+    getPriceAnalysis: Callable[[str], Coroutine[Any, Any, Any]] | None = None  # type: ignore[explicit-any]

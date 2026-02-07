@@ -42,10 +42,7 @@ class AgentPosition(BaseModel):
     updatedDate: datetime.datetime
     agentId: str
     collateralAsset: str
-    collateralAmount: int
-    borrowAmount: int
     targetLtv: float
-    vaultShares: int
     morphoMarketId: str
     status: str
 

@@ -1,0 +1,28 @@
+.withdrawInfoCard {
+  background: var(--box-background-color);
+  border: 1px solid var(--box-border-color);
+  border-radius: var(--kiba-border-radius);
+  padding: var(--kiba-padding-wide);
+}
+
+.withdrawPreviewCard {
+  background: var(--box-background-color);
+  border: 1px solid var(--box-border-color);
+  border-radius: var(--kiba-border-radius);
+  padding: var(--kiba-padding-wide);
+  transition: border-color 0.2s ease;
+
+  &.safe {
+    border-color: var(--kiba-color-success);
+  }
+
+  &.warning {
+    border-color: var(--kiba-color-warning);
+    background: var(--kiba-color-warning-clear90, rgba(255, 193, 7, 0.05));
+  }
+
+  &.danger {
+    border-color: var(--kiba-color-error);
+    background: var(--kiba-color-error-clear90, rgba(244, 67, 54, 0.05));
+  }
+}

@@ -43,14 +43,17 @@ from money_hack.api.v1_resources import PositionTransactionsData
 from money_hack.api.v1_resources import TransactionCall
 from money_hack.api.v1_resources import UserConfig
 from money_hack.api.v1_resources import Wallet
+from money_hack.api.v1_resources import WithdrawPreview
 from money_hack.api.v1_resources import WithdrawTransactionsData
 from money_hack.blockchain_data.alchemy_client import AlchemyClient
 from money_hack.blockchain_data.moralis_client import MoralisClient
+from money_hack.blockchain_data.price_intelligence_service import PriceIntelligenceService
 from money_hack.external.coinbase_cdp_client import CoinbaseCdpClient
 from money_hack.external.ens_client import EnsAgentConfig
 from money_hack.external.ens_client import EnsClient
 from money_hack.external.telegram_client import TelegramClient
 from money_hack.forty_acres.forty_acres_client import FortyAcresClient
+from money_hack.morpho import morpho_abis
 from money_hack.morpho.ltv_manager import LtvManager
 from money_hack.morpho.morpho_client import MorphoClient
 from money_hack.morpho.transaction_builder import TransactionBuilder
@@ -79,6 +82,18 @@ SUPPORTED_COLLATERALS = [
     CollateralAsset(chain_id=8453, address='0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf', symbol='cbBTC', name='Coinbase Wrapped BTC', decimals=8, logo_uri='https://assets.coingecko.com/coins/images/40143/standard/cbbtc.webp'),
 ]
 
+ERC20_BALANCE_ABI: ABI = [
+    {
+        'inputs': [{'name': 'account', 'type': 'address'}],
+        'name': 'balanceOf',
+        'outputs': [{'name': '', 'type': 'uint256'}],
+        'stateMutability': 'view',
+        'type': 'function',
+    },
+]
+
+WITHDRAW_HARD_LTV_FACTOR = 0.85
+
 YO_VAULT_ADDRESS = '0x0000000f2eB9f69274678c76222B35eEc7588a65'
 YO_VAULT_NAME = 'Yo USDC Vault'
 
@@ -104,6 +119,7 @@ class AgentManager(Authorizer):  # Core manager
         chatHistoryStore: ChatHistoryStore | None = None,
         ltvManager: LtvManager | None = None,
         notificationService: NotificationService | None = None,
+        priceIntelligenceService: 'PriceIntelligenceService | None' = None,
     ) -> None:
         self.chainId = chainId
         self.requester = requester
@@ -121,12 +137,12 @@ class AgentManager(Authorizer):  # Core manager
         self.deployerPrivateKey = deployerPrivateKey
         self.ltvManager = ltvManager
         self.notificationService = notificationService
+        self.priceIntelligenceService = priceIntelligenceService
         self.deployerAddress = Account.from_key(deployerPrivateKey).address if deployerPrivateKey else None
         self.deployerTransactionLock = asyncio.Lock()
         self.chatBot = chatBot
         self.chatHistoryStore = chatHistoryStore
         self._signatureSignerMap: dict[str, str] = {}
-        self._positionsCache: dict[str, Position] = {}
         self._userConfigsCache: dict[str, UserConfig] = {}
 
     async def _get_asset_price(self, assetAddress: str) -> float:
@@ -144,6 +160,21 @@ class AgentManager(Authorizer):  # Core manager
                 return priceData.priceUsd
         else:
             return priceData.priceUsd
+
+    async def _get_price_analysis(self, assetSymbol: str) -> object | None:
+        """Get price analysis for an asset by symbol (WETH, cbBTC). Used by chat tools."""
+        symbolAddressMap: dict[str, str] = {
+            'weth': constants.CHAIN_WETH_MAP.get(self.chainId, ''),
+            'cbbtc': '0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf',
+        }
+        address = symbolAddressMap.get(assetSymbol.lower())
+        if not address or not self.priceIntelligenceService:
+            return None
+        try:
+            return await self.priceIntelligenceService.get_price_analysis(chainId=self.chainId, assetAddress=address)
+        except Exception as e:  # noqa: BLE001
+            logging.warning(f'Failed to get price analysis for {assetSymbol}: {e}')
+            return None
 
     async def _retrieve_signature_signer_address(self, signatureString: str) -> str:
         if signatureString in self._signatureSignerMap:
@@ -265,7 +296,6 @@ class AgentManager(Authorizer):  # Core manager
             collateralValue = 100000.0
         borrowValue = collateralValue * target_ltv
         borrowAmountRaw = int(borrowValue * 1e6)
-        vaultSharesRaw = borrowAmountRaw
         estimatedApy = 0.08
         try:
             yieldApy = await self.fortyAcresClient.get_yield_apy(chainId=self.chainId)
@@ -278,10 +308,7 @@ class AgentManager(Authorizer):  # Core manager
         await self.databaseStore.create_position(
             agentId=agent.agentId,
             collateralAsset=collateral_asset_address,
-            collateralAmount=int(collateral_amount),
-            borrowAmount=borrowAmountRaw,
             targetLtv=target_ltv,
-            vaultShares=vaultSharesRaw,
             morphoMarketId=morphoMarketId,
         )
         transactionHash = await self._execute_agent_deploy_transactions(
@@ -309,8 +336,11 @@ class AgentManager(Authorizer):  # Core manager
             accrued_yield_usd=0.0,
             estimated_apy=estimatedApy,
             status='active',
+            wallet_collateral_balance='0',
+            wallet_collateral_balance_usd=0.0,
+            wallet_usdc_balance='0',
+            wallet_usdc_balance_usd=0.0,
         )
-        self._positionsCache[normalizedAddress] = position
         return position, transactionHash
 
     async def _make_deployer_transaction(self, params: TxParams, maxRetryCount: int = 3) -> str:
@@ -418,11 +448,23 @@ class AgentManager(Authorizer):  # Core manager
                 # Look up collateral asset to get correct decimals
                 collateral = next((c for c in SUPPORTED_COLLATERALS if c.address.lower() == position.collateralAsset.lower()), None)
                 collateralDecimals = collateral.decimals if collateral else 18
-                result = await self.ltvManager.check_position_ltv(position=position, collateralDecimals=collateralDecimals)
-                await self.ltvManager.log_ltv_check(result)
                 agent = await self.databaseStore.get_agent(agentId=position.agentId)
                 if not agent:
                     continue
+                # Fetch live on-chain values
+                onchainCollateral, onchainBorrow = await self._get_onchain_position(
+                    agentWalletAddress=agent.walletAddress,
+                    morphoMarketId=position.morphoMarketId,
+                )
+                _vaultShares, onchainVaultAssets = await self._get_actual_vault_balance(agentWalletAddress=agent.walletAddress)
+                result = await self.ltvManager.check_position_ltv(
+                    position=position,
+                    collateralDecimals=collateralDecimals,
+                    onchainCollateral=onchainCollateral,
+                    onchainBorrow=onchainBorrow,
+                    onchainVaultAssets=onchainVaultAssets,
+                )
+                await self.ltvManager.log_ltv_check(result)
                 user = await self.databaseStore.get_user(userId=agent.userId)
                 if not user:
                     continue
@@ -443,35 +485,118 @@ class AgentManager(Authorizer):  # Core manager
                         await self.notificationService.send_auto_repay_success(
                             agent=agent,
                             user=user,
-                            repayAmount=float(result.action_amount or 0) / 1e6,  # Assuming 6 decimals for USDC
+                            repayAmount=float(result.action_amount or 0) / 1e6,
                             oldLtv=result.current_ltv,
-                            newLtv=result.target_ltv,  # Approximate new LTV
+                            newLtv=result.target_ltv,
                         )
                     except Exception:  # noqa: BLE001
                         logging.exception(f'Failed to auto-repay for position {position.agentPositionId}')
-                        # Fallback to warning handled below if condition persists next check
-                # Handle Warnings (Manual Repay or Critical Threshold)
+                elif result.needs_action and result.action_type == 'auto_optimize':
+                    logging.info(f'Position {position.agentPositionId}: Auto-optimizing — borrowing {result.action_amount} USDC to maximize yield')
+                    try:
+                        actionTx = await self.ltvManager.build_auto_borrow_transactions(
+                            position=position,
+                            borrowAmount=result.action_amount or 0,
+                            userAddress=agent.walletAddress,
+                        )
+                        calls = [EncodedCall(toAddress=tx.to, data=HexBytes(tx.data).hex(), value=int(tx.value)) for tx in actionTx.transactions]
+                        await self._send_user_operation(
+                            agentWalletAddress=agent.walletAddress,
+                            calls=calls,
+                        )
+                        # Get price context for notification
+                        priceContext = None
+                        if self.priceIntelligenceService:
+                            try:
+                                priceAnalysis = await self.priceIntelligenceService.get_price_analysis(
+                                    chainId=self.chainId,
+                                    assetAddress=position.collateralAsset,
+                                )
+                                priceContext = priceAnalysis.to_summary()
+                            except Exception:  # noqa: BLE001
+                                pass
+                        await self.notificationService.send_auto_optimize_success(
+                            agent=agent,
+                            user=user,
+                            borrowAmount=float(result.action_amount or 0) / 1e6,
+                            oldLtv=result.current_ltv,
+                            newLtv=result.target_ltv,
+                            priceContext=priceContext,
+                        )
+                    except Exception:  # noqa: BLE001
+                        logging.exception(f'Failed to auto-optimize for position {position.agentPositionId}')
+                elif result.needs_action and result.action_type == 'manual_repay':
+                    logging.info(f'Position {position.agentPositionId}: Vault has insufficient funds for auto-repay, warning user')
+                    await self.notificationService.send_insufficient_vault_warning(
+                        agent=agent,
+                        user=user,
+                        currentLtv=result.current_ltv,
+                        maxLtv=result.max_ltv,
+                        requiredAmount=float(result.action_amount or 0) / 1e6,
+                    )
+                # Deploy idle wallet assets into the position
+                usdcAddress = constants.CHAIN_USDC_MAP[self.chainId]
+                walletCollateral = await self._get_erc20_balance(tokenAddress=position.collateralAsset, walletAddress=agent.walletAddress)
+                walletUsdc = await self._get_erc20_balance(tokenAddress=usdcAddress, walletAddress=agent.walletAddress)
+                # Deploy idle collateral: supply to Morpho + borrow USDC at target LTV + deposit to vault
+                if walletCollateral > 0:
+                    try:
+                        collateralPriceUsd = (await self.alchemyClient.get_asset_current_price(chainId=self.chainId, assetAddress=position.collateralAsset)).priceUsd
+                        collateralValueUsd = (walletCollateral / (10**collateralDecimals)) * collateralPriceUsd
+                        if collateralValueUsd >= 0.01:
+                            borrowAmountRaw = int(position.targetLtv * collateralValueUsd * 1e6)
+                            market = await self.morphoClient.get_market(chain_id=self.chainId, collateral_address=position.collateralAsset)
+                            if market is not None:
+                                transactions = self.ltvManager.transactionBuilder.build_position_transactions_from_market(
+                                    user_address=agent.walletAddress,
+                                    collateral_address=position.collateralAsset,
+                                    collateral_amount=walletCollateral,
+                                    borrow_amount=borrowAmountRaw,
+                                    market=market,
+                                )
+                                calls = [EncodedCall(toAddress=tx.to, data=HexBytes(tx.data).hex(), value=int(tx.value)) for tx in transactions]
+                                await self._send_user_operation(agentWalletAddress=agent.walletAddress, calls=calls)
+                                logging.info(f'Position {position.agentPositionId}: Deployed idle collateral ({walletCollateral} raw) + borrowed ${borrowAmountRaw / 1e6:.2f} USDC')
+                                await self.databaseStore.log_agent_action(
+                                    agentId=position.agentId,
+                                    actionType='deploy_idle_collateral',
+                                    value=f'{walletCollateral}',
+                                    valueId=str(position.agentPositionId),
+                                    details={'collateral_amount': walletCollateral, 'borrow_amount': borrowAmountRaw, 'collateral_value_usd': collateralValueUsd},
+                                )
+                    except Exception:  # noqa: BLE001
+                        logging.exception(f'Failed to deploy idle collateral for position {position.agentPositionId}')
+                # Deploy idle USDC: deposit to vault
+                if walletUsdc > 0:
+                    try:
+                        if walletUsdc / 1e6 >= 0.01:
+                            transactions = self.ltvManager.transactionBuilder.build_vault_deposit_transactions(
+                                user_address=agent.walletAddress,
+                                deposit_amount=walletUsdc,
+                            )
+                            calls = [EncodedCall(toAddress=tx.to, data=HexBytes(tx.data).hex(), value=int(tx.value)) for tx in transactions]
+                            await self._send_user_operation(agentWalletAddress=agent.walletAddress, calls=calls)
+                            logging.info(f'Position {position.agentPositionId}: Deposited idle ${walletUsdc / 1e6:.2f} USDC to vault')
+                            await self.databaseStore.log_agent_action(
+                                agentId=position.agentId,
+                                actionType='deploy_idle_usdc',
+                                value=f'${walletUsdc / 1e6:.2f}',
+                                valueId=str(position.agentPositionId),
+                                details={'usdc_amount': walletUsdc},
+                            )
+                    except Exception:  # noqa: BLE001
+                        logging.exception(f'Failed to deploy idle USDC for position {position.agentPositionId}')
+                # Handle Critical Threshold warning (even after action attempts)
                 currentLtv = result.current_ltv
                 maxLtv = result.max_ltv
                 isCritical = currentLtv >= CRITICAL_LTV_THRESHOLD * maxLtv and maxLtv > 0
-                if (result.needs_action and result.action_type == 'manual_repay') or isCritical:
-                    # Temporarily disabled throttling - send all messages for testing/agent thoughts
-                    # lastWarning = await self.databaseStore.get_latest_action_by_type(agent.agentId, 'critical_ltv_warning')
-                    shouldWarn = True
-                    # if lastWarning:
-                    #     timeSince = datetime.now(tz=UTC) - lastWarning.createdDate.replace(tzinfo=UTC)
-                    #     interval = URGENT_INTERVAL_HOURS if isCritical else WARN_INTERVAL_HOURS
-                    #     if timeSince.total_seconds() < interval * 3600:
-                    #         shouldWarn = False
-                    if shouldWarn:
-                        await self.notificationService.send_critical_ltv_warning(
-                            agent=agent,
-                            user=user,
-                            currentLtv=currentLtv,
-                            maxLtv=maxLtv,
-                        )
-                elif result.needs_action:
-                    logging.warning(f'Position {position.agentPositionId} needs action: {result.action_type} - {result.reason}')
+                if isCritical and result.action_type != 'manual_repay':
+                    await self.notificationService.send_critical_ltv_warning(
+                        agent=agent,
+                        user=user,
+                        currentLtv=currentLtv,
+                        maxLtv=maxLtv,
+                    )
                 # Daily Digest
                 # Temporarily disabled throttling - send all messages for testing/agent thoughts
                 # lastDigest = await self.databaseStore.get_latest_action_by_type(agent.agentId, 'daily_digest')
@@ -484,8 +609,8 @@ class AgentManager(Authorizer):  # Core manager
                 #         shouldSendDigest = False
                 if shouldSendDigest and not result.needs_action and not isCritical:
                     priceData = await self.alchemyClient.get_asset_current_price(chainId=self.chainId, assetAddress=position.collateralAsset)
-                    collateralValue = (position.collateralAmount / 1e18) * priceData.priceUsd
-                    debtValue = position.borrowAmount / 1e6
+                    collateralValue = (onchainCollateral / (10**collateralDecimals)) * priceData.priceUsd
+                    debtValue = onchainBorrow / 1e6
                     await self.notificationService.send_daily_digest(
                         agent=agent,
                         user=user,
@@ -550,14 +675,10 @@ class AgentManager(Authorizer):  # Core manager
         market = await self.morphoClient.get_market(chain_id=self.chainId, collateral_address=collateral_asset_address)
         morphoMarketId = market.unique_key if market else ''
         borrowAmountRaw = int(borrow_value * 1e6)
-        vaultSharesRaw = borrowAmountRaw
         await self.databaseStore.create_position(
             agentId=agent.agentId,
             collateralAsset=collateral_asset_address,
-            collateralAmount=int(collateral_amount),
-            borrowAmount=borrowAmountRaw,
             targetLtv=target_ltv,
-            vaultShares=vaultSharesRaw,
             morphoMarketId=morphoMarketId,
         )
         position = Position(
@@ -578,8 +699,11 @@ class AgentManager(Authorizer):  # Core manager
             accrued_yield_usd=0.0,
             estimated_apy=estimated_apy,
             status='active',
+            wallet_collateral_balance='0',
+            wallet_collateral_balance_usd=0.0,
+            wallet_usdc_balance='0',
+            wallet_usdc_balance_usd=0.0,
         )
-        self._positionsCache[normalized_address] = position
         agentResource = AgentResource(
             agent_id=agent.agentId,
             name=agent.name,
@@ -593,87 +717,143 @@ class AgentManager(Authorizer):  # Core manager
         return position, agentResource
 
     async def get_position(self, user_address: str) -> Position | None:
+        """Get position with all values fetched from on-chain (collateral, borrow, vault balance)."""
         normalized_address = chain_util.normalize_address(user_address)
-        position = self._positionsCache.get(normalized_address)
-        if position is None:
-            user = await self.databaseStore.get_user_by_wallet(walletAddress=normalized_address)
-            if user is None:
-                return None
-            agents = await self.databaseStore.get_agents_by_user(userId=user.userId)
-            if not agents:
-                return None
-            agent = agents[0]
-            dbPosition = await self.databaseStore.get_position_by_agent(agentId=agent.agentId)
-            if dbPosition is None:
-                return None
-            collateral = next((c for c in SUPPORTED_COLLATERALS if c.address.lower() == dbPosition.collateralAsset.lower()), SUPPORTED_COLLATERALS[0])
-            collateralAmountHuman = dbPosition.collateralAmount / (10**collateral.decimals)
-            borrowValueUsd = dbPosition.borrowAmount / 1e6
-            try:
-                priceUsd = await self._get_asset_price(assetAddress=dbPosition.collateralAsset)
-                collateralValueUsd = collateralAmountHuman * priceUsd
-            except Exception:  # noqa: BLE001
-                collateralValueUsd = 100000.0
-            estimatedApy = 0.08
-            try:
-                yieldApy = await self.fortyAcresClient.get_yield_apy(chainId=self.chainId)
-                if yieldApy is not None:
-                    estimatedApy = yieldApy
-            except Exception:  # noqa: BLE001
-                logging.debug('Failed to get yield APY, using default')
-            position = Position(
-                position_id=f'pos-{normalized_address[:8]}',
-                created_date=dbPosition.createdDate,
-                user_address=normalized_address,
-                collateral_asset=collateral,
-                collateral_amount=str(dbPosition.collateralAmount),
-                collateral_value_usd=collateralValueUsd,
-                borrow_amount=str(dbPosition.borrowAmount),
-                borrow_value_usd=borrowValueUsd,
-                current_ltv=borrowValueUsd / collateralValueUsd if collateralValueUsd > 0 else 0,
-                target_ltv=dbPosition.targetLtv,
-                health_factor=0.86 / (borrowValueUsd / collateralValueUsd) if collateralValueUsd > 0 else 999,
-                vault_balance=str(dbPosition.vaultShares),
-                vault_balance_usd=dbPosition.vaultShares / 1e6,
-                accrued_yield='0',
-                accrued_yield_usd=0.0,
-                estimated_apy=estimatedApy,
-                status=dbPosition.status,
-            )
-            self._positionsCache[normalized_address] = position
+        user = await self.databaseStore.get_user_by_wallet(walletAddress=normalized_address)
+        if user is None:
+            return None
+        agents = await self.databaseStore.get_agents_by_user(userId=user.userId)
+        if not agents:
+            return None
+        agent = agents[0]
+        dbPosition = await self.databaseStore.get_position_by_agent(agentId=agent.agentId)
+        if dbPosition is None:
+            return None
+        collateral = next((c for c in SUPPORTED_COLLATERALS if c.address.lower() == dbPosition.collateralAsset.lower()), SUPPORTED_COLLATERALS[0])
+        # Fetch all on-chain data: collateral amount, borrow amount, vault balance, price
         try:
-            priceUsd = await self._get_asset_price(assetAddress=position.collateral_asset.address)
-            collateralAmountHuman = int(position.collateral_amount) / (10**position.collateral_asset.decimals)
-            collateralValue = collateralAmountHuman * priceUsd
-            borrowValue = position.borrow_value_usd
-            currentLtv = borrowValue / collateralValue if collateralValue > 0 else 0
-            market = await self.morphoClient.get_market(chain_id=self.chainId, collateral_address=position.collateral_asset.address)
-            maxLtv = market.lltv if market else 0.86
-            updatedPosition = Position(
-                position_id=position.position_id,
-                created_date=position.created_date,
-                user_address=position.user_address,
-                collateral_asset=position.collateral_asset,
-                collateral_amount=position.collateral_amount,
-                collateral_value_usd=collateralValue,
-                borrow_amount=position.borrow_amount,
-                borrow_value_usd=borrowValue,
-                current_ltv=currentLtv,
-                target_ltv=position.target_ltv,
-                health_factor=maxLtv / currentLtv if currentLtv > 0 else 999,
-                vault_balance=position.vault_balance,
-                vault_balance_usd=position.vault_balance_usd,
-                accrued_yield=position.accrued_yield,
-                accrued_yield_usd=position.accrued_yield_usd,
-                estimated_apy=position.estimated_apy,
-                status=position.status,
+            onchainCollateral, onchainBorrow = await self._get_onchain_position(
+                agentWalletAddress=agent.walletAddress,
+                morphoMarketId=dbPosition.morphoMarketId,
             )
         except Exception:  # noqa: BLE001
-            logging.exception('Failed to refresh position data')
-            return position
-        else:
-            self._positionsCache[normalized_address] = updatedPosition
-            return updatedPosition
+            logging.exception('Failed to fetch on-chain position from Morpho Blue')
+            onchainCollateral = 0
+            onchainBorrow = 0
+        _actualVaultShares, actualVaultAssets = await self._get_actual_vault_balance(agentWalletAddress=agent.walletAddress)
+        # Fetch wallet balances (free tokens not deposited into Morpho/vault)
+        usdcAddress = constants.CHAIN_USDC_MAP[self.chainId]
+        walletCollateralBalance = await self._get_erc20_balance(tokenAddress=dbPosition.collateralAsset, walletAddress=agent.walletAddress)
+        walletUsdcBalance = await self._get_erc20_balance(tokenAddress=usdcAddress, walletAddress=agent.walletAddress)
+        collateralAmountHuman = onchainCollateral / (10**collateral.decimals)
+        walletCollateralHuman = walletCollateralBalance / (10**collateral.decimals)
+        borrowValueUsd = onchainBorrow / 1e6
+        try:
+            priceUsd = await self._get_asset_price(assetAddress=dbPosition.collateralAsset)
+            collateralValueUsd = collateralAmountHuman * priceUsd
+            walletCollateralValueUsd = walletCollateralHuman * priceUsd
+        except Exception:  # noqa: BLE001
+            collateralValueUsd = 100000.0
+            walletCollateralValueUsd = 0.0
+        walletUsdcValueUsd = walletUsdcBalance / 1e6
+        currentLtv = borrowValueUsd / collateralValueUsd if collateralValueUsd > 0 else 0
+        market = await self.morphoClient.get_market(chain_id=self.chainId, collateral_address=dbPosition.collateralAsset)
+        maxLtv = market.lltv if market else 0.86
+        estimatedApy = 0.08
+        try:
+            yieldApy = await self.fortyAcresClient.get_yield_apy(chainId=self.chainId)
+            if yieldApy is not None:
+                estimatedApy = yieldApy
+        except Exception:  # noqa: BLE001
+            logging.debug('Failed to get yield APY, using default')
+        position = Position(
+            position_id=f'pos-{normalized_address[:8]}',
+            created_date=dbPosition.createdDate,
+            user_address=normalized_address,
+            collateral_asset=collateral,
+            collateral_amount=str(onchainCollateral),
+            collateral_value_usd=collateralValueUsd,
+            borrow_amount=str(onchainBorrow),
+            borrow_value_usd=borrowValueUsd,
+            current_ltv=currentLtv,
+            target_ltv=dbPosition.targetLtv,
+            health_factor=maxLtv / currentLtv if currentLtv > 0 else 999,
+            vault_balance=str(actualVaultAssets),
+            vault_balance_usd=actualVaultAssets / 1e6,
+            accrued_yield='0',
+            accrued_yield_usd=0.0,
+            estimated_apy=estimatedApy,
+            status=dbPosition.status,
+            wallet_collateral_balance=str(walletCollateralBalance),
+            wallet_collateral_balance_usd=walletCollateralValueUsd,
+            wallet_usdc_balance=str(walletUsdcBalance),
+            wallet_usdc_balance_usd=walletUsdcValueUsd,
+        )
+        return position
+
+    async def _get_actual_vault_balance(self, agentWalletAddress: str) -> tuple[int, int]:
+        """Get actual vault shares and their USDC value from on-chain data.
+        Returns: (shares, assets_in_usdc)
+        """
+        sharesResponse = await self.ethClient.call_function_by_name(
+            toAddress=YO_VAULT_ADDRESS,
+            contractAbi=morpho_abis.ERC4626_VAULT_ABI,
+            functionName='balanceOf',
+            arguments={'account': agentWalletAddress},
+        )
+        shares = int(sharesResponse[0])
+        if shares == 0:
+            return 0, 0
+        assetsResponse = await self.ethClient.call_function_by_name(
+            toAddress=YO_VAULT_ADDRESS,
+            contractAbi=morpho_abis.ERC4626_VAULT_ABI,
+            functionName='convertToAssets',
+            arguments={'shares': shares},
+        )
+        assets = int(assetsResponse[0])
+        return shares, assets
+
+    async def _get_onchain_position(self, agentWalletAddress: str, morphoMarketId: str) -> tuple[int, int]:
+        """Get live collateral and borrow amounts from Morpho Blue contract.
+        Returns: (collateral_amount_raw, borrow_amount_raw_usdc)
+        """
+        from money_hack.morpho.transaction_builder import MORPHO_BLUE_ADDRESS
+        marketIdBytes = bytes.fromhex(morphoMarketId[2:]) if morphoMarketId.startswith('0x') else bytes.fromhex(morphoMarketId)
+        # Fetch user position: (supplyShares, borrowShares, collateral)
+        positionResponse = await self.ethClient.call_function_by_name(
+            toAddress=MORPHO_BLUE_ADDRESS,
+            contractAbi=morpho_abis.MORPHO_BLUE_ABI,
+            functionName='position',
+            arguments={'id': marketIdBytes, 'user': agentWalletAddress},
+        )
+        collateralAmount = int(positionResponse[2])
+        borrowShares = int(positionResponse[1])
+        if borrowShares == 0:
+            return collateralAmount, 0
+        # Fetch market state to convert borrowShares -> borrowAssets
+        marketResponse = await self.ethClient.call_function_by_name(
+            toAddress=MORPHO_BLUE_ADDRESS,
+            contractAbi=morpho_abis.MORPHO_BLUE_ABI,
+            functionName='market',
+            arguments={'id': marketIdBytes},
+        )
+        totalBorrowAssets = int(marketResponse[2])
+        totalBorrowShares = int(marketResponse[3])
+        if totalBorrowShares == 0:
+            return collateralAmount, 0
+        # borrowAssets = borrowShares * totalBorrowAssets / totalBorrowShares (round up for debt)
+        borrowAmount = (borrowShares * totalBorrowAssets + totalBorrowShares - 1) // totalBorrowShares
+        return collateralAmount, borrowAmount
+
+    async def _get_erc20_balance(self, tokenAddress: str, walletAddress: str) -> int:
+        """Get ERC20 token balance for a wallet address."""
+        response = await self.ethClient.call_function_by_name(
+            toAddress=tokenAddress,
+            contractAbi=ERC20_BALANCE_ABI,
+            functionName='balanceOf',
+            arguments={'account': walletAddress},
+        )
+        return int(response[0])
 
     async def get_market_data(self) -> tuple[list[CollateralMarketData], float, str, str]:
         collateralMarkets: list[CollateralMarketData] = []
@@ -699,8 +879,71 @@ class AgentManager(Authorizer):  # Core manager
             raise ValueError('Failed to get Yo.xyz yield APY')
         return collateralMarkets, yieldApy, YO_VAULT_ADDRESS, YO_VAULT_NAME
 
-    async def get_withdraw_transactions(self, user_address: str, amount: str) -> WithdrawTransactionsData:
-        """Build transactions for partial withdrawal from vault (keeps position open)."""
+    async def _calc_withdraw_preview(self, userAddress: str, withdrawAmountRaw: int) -> WithdrawPreview:
+        normalizedAddress = chain_util.normalize_address(userAddress)
+        user = await self.databaseStore.get_user_by_wallet(walletAddress=normalizedAddress)
+        if user is None:
+            raise NotFoundException(message='User not found')
+        agents = await self.databaseStore.get_agents_by_user(userId=user.userId)
+        if not agents:
+            raise NotFoundException(message='No agent found')
+        agent = agents[0]
+        dbPosition = await self.databaseStore.get_position_by_agent(agentId=agent.agentId)
+        if dbPosition is None:
+            raise NotFoundException(message='No active position found')
+        onchainCollateral, onchainBorrow = await self._get_onchain_position(
+            agentWalletAddress=agent.walletAddress,
+            morphoMarketId=dbPosition.morphoMarketId,
+        )
+        _actualVaultShares, actualVaultAssets = await self._get_actual_vault_balance(agentWalletAddress=agent.walletAddress)
+        collateral = next((c for c in SUPPORTED_COLLATERALS if c.address.lower() == dbPosition.collateralAsset.lower()), SUPPORTED_COLLATERALS[0])
+        collateralAmountHuman = onchainCollateral / (10**collateral.decimals)
+        try:
+            priceUsd = await self._get_asset_price(assetAddress=dbPosition.collateralAsset)
+            collateralValueUsd = collateralAmountHuman * priceUsd
+        except Exception:  # noqa: BLE001
+            collateralValueUsd = 0.0
+        market = await self.morphoClient.get_market(chain_id=self.chainId, collateral_address=dbPosition.collateralAsset)
+        maxLtv = market.lltv if market else 0.86
+        vaultRaw = actualVaultAssets
+        borrowRaw = onchainBorrow
+        targetLtv = dbPosition.targetLtv
+        hardLtv = WITHDRAW_HARD_LTV_FACTOR * maxLtv
+        withdrawRaw = max(min(withdrawAmountRaw, vaultRaw), 0)
+        borrowValueUsd = borrowRaw / 1e6
+        currentLtv = borrowValueUsd / collateralValueUsd if collateralValueUsd > 0 else 0.0
+        estimatedNewLtv = currentLtv
+        repayBuffer = max(borrowRaw - int(targetLtv * collateralValueUsd * 1e6), 0)
+        maxSafeWithdraw = max(vaultRaw - repayBuffer, 0)
+        isWarning = withdrawRaw > maxSafeWithdraw and withdrawRaw <= vaultRaw
+        hardRepayBuffer = max(borrowRaw - int(hardLtv * collateralValueUsd * 1e6), 0)
+        maxHardWithdraw = max(vaultRaw - hardRepayBuffer, 0)
+        isBlocked = withdrawRaw > maxHardWithdraw
+        warningMessage: str | None = None
+        if isBlocked:
+            warningMessage = f'This withdrawal would leave insufficient funds for the agent to manage your position safely. Maximum withdrawal: ${maxHardWithdraw / 1e6:.2f} USDC.'
+        elif isWarning:
+            warningMessage = f"This withdrawal reduces the agent's ability to auto-repay if your LTV rises. The agent recommends keeping at least ${repayBuffer / 1e6:.2f} USDC in the vault."
+        return WithdrawPreview(
+            withdraw_amount=str(withdrawRaw),
+            vault_balance=str(vaultRaw),
+            max_safe_withdraw=str(maxSafeWithdraw),
+            current_ltv=currentLtv,
+            estimated_new_ltv=estimatedNewLtv,
+            target_ltv=targetLtv,
+            max_ltv=maxLtv,
+            hard_max_ltv=hardLtv,
+            is_warning=isWarning,
+            is_blocked=isBlocked,
+            warning_message=warningMessage,
+        )
+
+    async def get_withdraw_preview(self, user_address: str, amount: str) -> WithdrawPreview:
+        withdrawAmountRaw = int(amount)
+        return await self._calc_withdraw_preview(userAddress=user_address, withdrawAmountRaw=withdrawAmountRaw)
+
+    async def execute_withdraw(self, user_address: str, amount: str) -> WithdrawTransactionsData:
+        """Execute a partial withdrawal from vault via the agent's smart wallet."""
         normalizedAddress = chain_util.normalize_address(user_address)
         user = await self.databaseStore.get_user_by_wallet(walletAddress=normalizedAddress)
         if user is None:
@@ -713,14 +956,37 @@ class AgentManager(Authorizer):  # Core manager
         if dbPosition is None:
             raise NotFoundException(message='No active position found')
         withdrawAmount = int(amount)
-        if withdrawAmount > dbPosition.vaultShares:
-            raise ValueError(f'Requested withdrawal {withdrawAmount} exceeds vault balance {dbPosition.vaultShares}')
+        _actualVaultShares, actualAssets = await self._get_actual_vault_balance(agentWalletAddress=agent.walletAddress)
+        logging.info(f'Vault balance check: Actual assets={actualAssets}, Requested withdrawal={withdrawAmount}')
+        if withdrawAmount > actualAssets:
+            raise BadRequestException(message=f'Requested withdrawal ${withdrawAmount / 1e6:.2f} exceeds actual vault balance ${actualAssets / 1e6:.2f}')
+        sharesToRedeemResponse = await self.ethClient.call_function_by_name(
+            toAddress=YO_VAULT_ADDRESS,
+            contractAbi=morpho_abis.ERC4626_VAULT_ABI,
+            functionName='convertToShares',
+            arguments={'assets': withdrawAmount},
+        )
+        sharesToRedeem = int(sharesToRedeemResponse[0])
+        preview = await self._calc_withdraw_preview(userAddress=user_address, withdrawAmountRaw=withdrawAmount)
+        if preview.is_blocked:
+            raise BadRequestException(message=preview.warning_message or 'Withdrawal amount is too large')
         usdcAddress = constants.CHAIN_USDC_MAP.get(self.chainId)
         if usdcAddress is None:
             raise ValueError(f'USDC not supported on chain {self.chainId}')
         transactionBuilder = TransactionBuilder(chainId=self.chainId, usdcAddress=usdcAddress, yoVaultAddress=YO_VAULT_ADDRESS)
-        transactions = transactionBuilder.build_withdraw_transactions(user_address=normalizedAddress, withdraw_amount=withdrawAmount)
-        logging.info(f'Built withdraw transactions for {normalizedAddress}: {withdrawAmount} USDC')
+        transactions = transactionBuilder.build_withdraw_transactions(user_address=agent.walletAddress, withdraw_shares=sharesToRedeem)
+        calls = [EncodedCall(toAddress=tx.to, data=tx.data if tx.data.startswith('0x') else f'0x{tx.data}', value=int(tx.value or '0')) for tx in transactions]
+        transactionHash = await self._send_user_operation(agentWalletAddress=agent.walletAddress, calls=calls)
+        logging.info(f'Executed withdraw for {normalizedAddress} via agent {agent.walletAddress}: {withdrawAmount} USDC ({sharesToRedeem} shares), tx={transactionHash}')
+        if self.notificationService:
+            await self.notificationService.send_ltv_adjustment(
+                agent=agent,
+                user=user,
+                actionType='withdraw',
+                amount=f'{withdrawAmount / 1e6:.2f}',
+                oldLtv=preview.current_ltv,
+                newLtv=preview.estimated_new_ltv,
+            )
         return WithdrawTransactionsData(transactions=transactions, withdraw_amount=str(withdrawAmount), vault_address=YO_VAULT_ADDRESS)
 
     async def get_close_position_transactions(self, user_address: str) -> ClosePositionTransactionsData:
@@ -742,9 +1008,14 @@ class AgentManager(Authorizer):  # Core manager
         usdcAddress = constants.CHAIN_USDC_MAP.get(self.chainId)
         if usdcAddress is None:
             raise ValueError(f'USDC not supported on chain {self.chainId}')
-        vaultWithdrawAmount = dbPosition.vaultShares
-        repayAmount = dbPosition.borrowAmount
-        collateralAmount = dbPosition.collateralAmount
+        onchainCollateral, onchainBorrow = await self._get_onchain_position(
+            agentWalletAddress=agent.walletAddress,
+            morphoMarketId=dbPosition.morphoMarketId,
+        )
+        actualVaultShares, _actualVaultAssets = await self._get_actual_vault_balance(agentWalletAddress=agent.walletAddress)
+        vaultWithdrawAmount = actualVaultShares
+        repayAmount = onchainBorrow
+        collateralAmount = onchainCollateral
         transactionBuilder = TransactionBuilder(chainId=self.chainId, usdcAddress=usdcAddress, yoVaultAddress=YO_VAULT_ADDRESS)
         transactions = transactionBuilder.build_close_position_transactions_from_market(
             user_address=normalizedAddress,
@@ -768,25 +1039,40 @@ class AgentManager(Authorizer):  # Core manager
     async def get_wallet(self, wallet_address: str) -> Wallet:
         walletAddress = chain_util.normalize_address(wallet_address)
         clientAssetBalances = await self.alchemyClient.get_wallet_asset_balances(chainId=self.chainId, walletAddress=walletAddress)
+        # Include both collateral assets and USDC
+        usdcAddress = constants.CHAIN_USDC_MAP.get(self.chainId)
         supportedAddresses = {c.address.lower() for c in SUPPORTED_COLLATERALS}
+        if usdcAddress:
+            supportedAddresses.add(usdcAddress.lower())
         assetBalances: list[AssetBalance] = []
         for clientBalance in clientAssetBalances:
-            if clientBalance.assetAddress.lower() not in supportedAddresses:
+            normalizedBalance = clientBalance.assetAddress.lower()
+            if normalizedBalance not in supportedAddresses:
                 continue
-            collateral = next((c for c in SUPPORTED_COLLATERALS if c.address.lower() == clientBalance.assetAddress.lower()), None)
-            if collateral is None:
+            collateral = next((c for c in SUPPORTED_COLLATERALS if c.address.lower() == normalizedBalance), None)
+            if collateral:
+                symbol = collateral.symbol
+                decimals = collateral.decimals
+            elif usdcAddress and normalizedBalance == usdcAddress.lower():
+                symbol = 'USDC'
+                decimals = 6
+            else:
                 continue
             try:
-                priceUsd = await self._get_asset_price(assetAddress=clientBalance.assetAddress)
-                balanceHuman = clientBalance.balance / (10**collateral.decimals)
-                balanceUsd = balanceHuman * priceUsd
+                if symbol == 'USDC':
+                    balanceHuman = clientBalance.balance / (10**decimals)
+                    balanceUsd = balanceHuman  # USDC is $1
+                else:
+                    priceUsd = await self._get_asset_price(assetAddress=clientBalance.assetAddress)
+                    balanceHuman = clientBalance.balance / (10**decimals)
+                    balanceUsd = balanceHuman * priceUsd
             except Exception:  # noqa: BLE001
                 balanceUsd = 0.0
             assetBalances.append(
                 AssetBalance(
                     asset_address=clientBalance.assetAddress,
-                    asset_symbol=collateral.symbol,
-                    asset_decimals=collateral.decimals,
+                    asset_symbol=symbol,
+                    asset_decimals=decimals,
                     balance=str(clientBalance.balance),
                     balance_usd=balanceUsd,
                 )
@@ -1010,6 +1296,7 @@ class AgentManager(Authorizer):  # Core manager
             databaseStore=self.databaseStore,
             getMarketData=self.get_market_data,
             getPosition=self.get_position,
+            getPriceAnalysis=self._get_price_analysis if self.priceIntelligenceService else None,
         )
         systemPrompt = BORROWBOT_SYSTEM_PROMPT.format(agent_name=f'{agent.emoji} {agent.name}')
         userPrompt = BORROWBOT_USER_PROMPT

@@ -71,6 +71,21 @@
     }
   }
 
+  .criticalWarningBanner {
+    border-radius: var(--kiba-border-radius);
+    padding: var(--kiba-padding-wide);
+
+    &.danger {
+      border: 2px solid var(--kiba-color-error);
+      background: var(--kiba-color-error-clear90, rgba(244, 67, 54, 0.08));
+    }
+
+    &.warning {
+      border: 2px solid var(--kiba-color-warning);
+      background: var(--kiba-color-warning-clear90, rgba(255, 193, 7, 0.08));
+    }
+  }
+
   .rateComparison {
     display: flex;
     flex-direction: column;
