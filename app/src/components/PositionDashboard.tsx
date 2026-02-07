@@ -321,11 +321,7 @@ export function PositionDashboard(props: IPositionDashboardProps): React.ReactEl
               <Stack direction={Direction.Horizontal} shouldAddGutters={true} childAlignment={Alignment.Center}>
                 <Text>Yield APY</Text>
                 {props.marketData && (
-                  <Text variant='note'>
-                    (
-                    {props.marketData.yieldVaultName}
-                    )
-                  </Text>
+                  <Text variant='note'>{`(${props.marketData.yieldVaultName})`}</Text>
                 )}
               </Stack>
               <Text variant='bold-success'>{formatPercent(yieldApy)}</Text>
