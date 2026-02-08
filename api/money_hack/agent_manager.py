@@ -668,70 +668,22 @@ class AgentManager(Authorizer):  # Core manager
                         currentLtv=currentLtv,
                         maxLtv=maxLtv,
                     )
-                # Daily Digest
-                # Temporarily disabled throttling - send all messages for testing/agent thoughts
-                # lastDigest = await self.databaseStore.get_latest_action_by_type(agent.agentId, 'daily_digest')
-                shouldSendDigest = True
-                # if lastDigest:
-                #     # Use aware datetime for comparison
-                #     lastCreated = lastDigest.createdDate.replace(tzinfo=UTC) if lastDigest.createdDate.tzinfo is None else lastDigest.createdDate
-                #     timeSince = datetime.now(tz=UTC) - lastCreated
-                #     if timeSince.total_seconds() < 24 * 3600:
-                #         shouldSendDigest = False
-                if shouldSendDigest and not result.needs_action and not isCritical:
-                    priceData = await self.alchemyClient.get_asset_current_price(chainId=self.chainId, assetAddress=position.collateralAsset)
-                    collateralValue = (onchainCollateral / (10**collateralDecimals)) * priceData.priceUsd
-                    debtValue = onchainBorrow / 1e6
-                    await self.notificationService.send_daily_digest(
-                        agent=agent,
-                        user=user,
-                        currentLtv=currentLtv,
-                        collateralValue=collateralValue,
-                        debtValue=debtValue,
-                    )
+                # Status notification - send every check cycle (every 5 minutes)
+                # No throttling for demo purposes
+                priceData = await self.alchemyClient.get_asset_current_price(chainId=self.chainId, assetAddress=position.collateralAsset)
+                collateralValue = (onchainCollateral / (10**collateralDecimals)) * priceData.priceUsd
+                debtValue = onchainBorrow / 1e6
+                await self.notificationService.send_daily_digest(
+                    agent=agent,
+                    user=user,
+                    currentLtv=currentLtv,
+                    collateralValue=collateralValue,
+                    debtValue=debtValue,
+                )
                 # ENS status writes are on mainnet — too expensive for every check cycle.
                 # Status is written via scripts/set_ens_constitution.py when needed.
             except Exception:  # noqa: BLE001
                 logging.exception(f'Error checking position {position.agentPositionId}')
-
-    async def send_demo_status_notifications(self) -> None:
-        """Demo mode: Send periodic status notifications to keep Telegram active."""
-        if not self.notificationService:
-            return
-        positions = await self.databaseStore.get_all_active_positions()
-        logging.info(f'📢 Demo mode: Sending status updates for {len(positions)} positions')
-        for position in positions:
-            try:
-                agent = await self.databaseStore.get_agent(agentId=position.agentId)
-                if not agent:
-                    continue
-                user = await self.databaseStore.get_user(userId=agent.userId)
-                if not user or not user.telegramChatId:
-                    continue
-                # Get current position data
-                collateral = next((c for c in SUPPORTED_COLLATERALS if c.address.lower() == position.collateralAsset.lower()), None)
-                collateralDecimals = collateral.decimals if collateral else 18
-                onchainCollateral, onchainBorrow = await self._get_onchain_position(
-                    agentWalletAddress=agent.walletAddress,
-                    morphoMarketId=position.morphoMarketId,
-                )
-                _vaultShares, onchainVaultAssets = await self._get_actual_vault_balance(agentWalletAddress=agent.walletAddress)
-                priceData = await self.alchemyClient.get_asset_current_price(chainId=self.chainId, assetAddress=position.collateralAsset)
-                collateralValue = (onchainCollateral / (10**collateralDecimals)) * priceData.priceUsd
-                debtValue = onchainBorrow / 1e6
-                vaultValue = (onchainVaultAssets or 0) / 1e6
-                currentLtv = debtValue / collateralValue if collateralValue > 0 else 0
-                # Send status message
-                message = f'🤖 Agent Status Update\n\n'
-                message += f'Collateral: ${collateralValue:.2f} ({collateral.symbol if collateral else "Unknown"})\n'
-                message += f'Debt: ${debtValue:.2f} USDC\n'
-                message += f'Vault: ${vaultValue:.2f} USDC\n'
-                message += f'LTV: {currentLtv:.1%} / {position.targetLtv:.1%} target\n\n'
-                message += f'✅ Everything is running smoothly!'
-                await self.telegramClient.send_message(chatId=user.telegramChatId, text=message)
-                logging.info(f'Sent demo status notification for agent {agent.agentId}')
-            except Exception:  # noqa: BLE001
-                logging.exception(f'Failed to send demo status notification for position {position.agentPositionId}')
 
     async def _execute_agent_deploy_transactions(self, agentWalletAddress: str, userAddress: str, collateralAssetAddress: str, collateralAmount: str, targetLtv: float) -> str | None:
         if self.coinbaseCdpClient is None or self.coinbaseSmartWallet is None or self.coinbaseBundler is None or self.deployerPrivateKey is None:
