@@ -694,6 +694,45 @@ class AgentManager(Authorizer):  # Core manager
             except Exception:  # noqa: BLE001
                 logging.exception(f'Error checking position {position.agentPositionId}')
 
+    async def send_demo_status_notifications(self) -> None:
+        """Demo mode: Send periodic status notifications to keep Telegram active."""
+        if not self.notificationService:
+            return
+        positions = await self.databaseStore.get_all_active_positions()
+        logging.info(f'📢 Demo mode: Sending status updates for {len(positions)} positions')
+        for position in positions:
+            try:
+                agent = await self.databaseStore.get_agent(agentId=position.agentId)
+                if not agent:
+                    continue
+                user = await self.databaseStore.get_user(userId=agent.userId)
+                if not user or not user.telegramChatId:
+                    continue
+                # Get current position data
+                collateral = next((c for c in SUPPORTED_COLLATERALS if c.address.lower() == position.collateralAsset.lower()), None)
+                collateralDecimals = collateral.decimals if collateral else 18
+                onchainCollateral, onchainBorrow = await self._get_onchain_position(
+                    agentWalletAddress=agent.walletAddress,
+                    morphoMarketId=position.morphoMarketId,
+                )
+                _vaultShares, onchainVaultAssets = await self._get_actual_vault_balance(agentWalletAddress=agent.walletAddress)
+                priceData = await self.alchemyClient.get_asset_current_price(chainId=self.chainId, assetAddress=position.collateralAsset)
+                collateralValue = (onchainCollateral / (10**collateralDecimals)) * priceData.priceUsd
+                debtValue = onchainBorrow / 1e6
+                vaultValue = (onchainVaultAssets or 0) / 1e6
+                currentLtv = debtValue / collateralValue if collateralValue > 0 else 0
+                # Send status message
+                message = f'🤖 Agent Status Update\n\n'
+                message += f'Collateral: ${collateralValue:.2f} ({collateral.symbol if collateral else "Unknown"})\n'
+                message += f'Debt: ${debtValue:.2f} USDC\n'
+                message += f'Vault: ${vaultValue:.2f} USDC\n'
+                message += f'LTV: {currentLtv:.1%} / {position.targetLtv:.1%} target\n\n'
+                message += f'✅ Everything is running smoothly!'
+                await self.telegramClient.send_message(chatId=user.telegramChatId, text=message)
+                logging.info(f'Sent demo status notification for agent {agent.agentId}')
+            except Exception:  # noqa: BLE001
+                logging.exception(f'Failed to send demo status notification for position {position.agentPositionId}')
+
     async def _execute_agent_deploy_transactions(self, agentWalletAddress: str, userAddress: str, collateralAssetAddress: str, collateralAmount: str, targetLtv: float) -> str | None:
         if self.coinbaseCdpClient is None or self.coinbaseSmartWallet is None or self.coinbaseBundler is None or self.deployerPrivateKey is None:
             return None
