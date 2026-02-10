@@ -5,7 +5,6 @@ import { Alignment, Box, Button, Dialog, Direction, getVariant, Image, KibaIcon,
 import { Eip6963ProviderDetail, useIsReownInitialized, useOnLinkWeb3AccountsClicked, useWeb3OnBaseLoginClicked, useWeb3OnLoginClicked, useWeb3OnReownLoginClicked, useWeb3Providers } from '@kibalabs/web3-react';
 
 import { useAuth } from '../AuthContext';
-import { useGlobals } from '../GlobalsContext';
 
 import './HomePage.scss';
 
@@ -142,7 +141,6 @@ function ProviderDialog(props: IProviderDialogProps): React.ReactElement {
 
 export function HomePage(): React.ReactElement {
   const { isWeb3AccountConnected, isWeb3AccountLoggedIn, logout, accountAddress, authToken } = useAuth();
-  const { moneyHackClient } = useGlobals();
   const navigator = useNavigator();
   const [web3Providers, chooseEip1193Provider] = useWeb3Providers();
   const onLinkAccountsClicked = useOnLinkWeb3AccountsClicked();
@@ -154,23 +152,10 @@ export function HomePage(): React.ReactElement {
   const [isLoggingIn, setIsLoggingIn] = React.useState<boolean>(false);
 
   React.useEffect(() => {
-    const checkAgentAndRedirect = async (): Promise<void> => {
-      if (isWeb3AccountLoggedIn && accountAddress && authToken) {
-        try {
-          const agent = await moneyHackClient.getAgent(accountAddress, authToken);
-          if (agent) {
-            navigator.navigateTo('/agent');
-          } else {
-            navigator.navigateTo('/create-agent');
-          }
-        } catch (error) {
-          console.error('Failed to check for existing agent', error);
-          navigator.navigateTo('/create-agent');
-        }
-      }
-    };
-    checkAgentAndRedirect();
-  }, [isWeb3AccountLoggedIn, accountAddress, authToken, moneyHackClient, navigator]);
+    if (isWeb3AccountLoggedIn && accountAddress && authToken) {
+      navigator.navigateTo('/agents');
+    }
+  }, [isWeb3AccountLoggedIn, accountAddress, authToken, navigator]);
 
   const onConnectWalletClicked = React.useCallback((): void => {
     setIsProviderDialogOpen(true);

@@ -111,6 +111,7 @@ class ClosePositionTransactionsData(BaseModel):
     vault_withdraw_amount: str
     morpho_address: str
     vault_address: str
+    transaction_hash: str | None = None
 
 
 class Agent(BaseModel):
@@ -161,19 +162,4 @@ class AgentActionResource(BaseModel):
     agent_id: str
     action_type: str
     value: str
-    details: dict[str, object]
-
-
-class CrossChainActionResource(BaseModel):
-    action_id: int
-    created_date: datetime
-    action_type: str
-    from_chain: int
-    to_chain: int
-    from_token: str
-    to_token: str
-    amount: str
-    tx_hash: str | None = None
-    bridge_name: str | None = None
-    status: str
     details: dict[str, object]

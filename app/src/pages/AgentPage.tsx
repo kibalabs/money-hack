@@ -1,13 +1,13 @@
 import React from 'react';
 
-import { useLocalStorageState, useNavigator } from '@kibalabs/core-react';
+import { useLocalStorageState, useLocation, useNavigator } from '@kibalabs/core-react';
 import { Alignment, Box, Button, Direction, PaddingSize, Spacing, Stack, Text } from '@kibalabs/ui-react';
 import { useToastManager } from '@kibalabs/ui-react-toast';
 
 import { useAuth } from '../AuthContext';
-import { Agent, AgentAction, ChatMessage, CrossChainAction, EnsConstitution, MarketData, Position, Wallet } from '../client/resources';
+import { Agent, AgentAction, ChatMessage, EnsConstitution, MarketData, Position, Wallet } from '../client/resources';
 import { AgentTerminal } from '../components/AgentTerminal';
-import { CrossChainPanel } from '../components/CrossChainPanel';
+import { ClosePositionDialog } from '../components/ClosePositionDialog';
 import { DepositDialog } from '../components/DepositDialog';
 import { DepositUsdcDialog } from '../components/DepositUsdcDialog';
 import { FloatingChat } from '../components/FloatingChat';
@@ -19,12 +19,15 @@ export function AgentPage(): React.ReactElement {
   const { accountAddress, authToken, isWeb3AccountLoggedIn, logout } = useAuth();
   const { moneyHackClient, localStorageClient } = useGlobals();
   const navigator = useNavigator();
+  const location = useLocation();
   const toastManager = useToastManager();
+  const urlAgentId = new URLSearchParams(location?.search || '').get('agentId') || undefined;
 
   const [position, setPosition] = React.useState<Position | null>(null);
   const [marketData, setMarketData] = React.useState<MarketData | null>(null);
   const [agent, setAgent] = React.useState<Agent | null>(null);
-  const [wallet, setWallet] = React.useState<Wallet | null>(null);
+  const [agentWallet, setAgentWallet] = React.useState<Wallet | null>(null);
+  const [userWallet, setUserWallet] = React.useState<Wallet | null>(null);
   const [agentActions, setAgentActions] = React.useState<AgentAction[]>([]);
   const [isLoading, setIsLoading] = React.useState<boolean>(true);
   const [isLoadingActions, setIsLoadingActions] = React.useState<boolean>(false);
@@ -32,8 +35,8 @@ export function AgentPage(): React.ReactElement {
   const [isWithdrawDialogOpen, setIsWithdrawDialogOpen] = React.useState<boolean>(false);
   const [isDepositDialogOpen, setIsDepositDialogOpen] = React.useState<boolean>(false);
   const [isDepositUsdcDialogOpen, setIsDepositUsdcDialogOpen] = React.useState<boolean>(false);
+  const [isClosePositionDialogOpen, setIsClosePositionDialogOpen] = React.useState<boolean>(false);
   const [constitution, setConstitution] = React.useState<EnsConstitution | null>(null);
-  const [crossChainActions, setCrossChainActions] = React.useState<CrossChainAction[]>([]);
   const hasLoadedRef = React.useRef<boolean>(false);
   const [conversationId, setConversationId] = useLocalStorageState(`borrowbot-${accountAddress || 'default'}-conversationId`, localStorageClient);
 
@@ -51,39 +54,48 @@ export function AgentPage(): React.ReactElement {
       setIsRefreshing(true);
     }
     try {
-      const [fetchedPosition, fetchedMarketData, fetchedAgent] = await Promise.all([
-        moneyHackClient.getPosition(accountAddress, authToken),
+      const [fetchedMarketData, fetchedAgents] = await Promise.all([
         moneyHackClient.getMarketData(),
-        moneyHackClient.getAgent(accountAddress, authToken),
+        moneyHackClient.getAgents(accountAddress, authToken),
       ]);
+      const fetchedAgent = urlAgentId
+        ? fetchedAgents.find((a) => a.agentId === urlAgentId) ?? fetchedAgents[0] ?? null
+        : fetchedAgents[0] ?? null;
+
+      if (!fetchedAgent) {
+        navigator.navigateTo('/setup');
+        return;
+      }
+
+      setAgent(fetchedAgent);
+      setMarketData(fetchedMarketData);
+
+      // Fetch agent-specific data
+      const [fetchedPosition, fetchedAgentWallet, fetchedUserWallet, fetchedConstitution] = await Promise.all([
+        moneyHackClient.getAgentPosition(fetchedAgent.agentId, authToken),
+        moneyHackClient.getAgentWallet(fetchedAgent.agentId, authToken).catch((error) => {
+          console.error('Failed to load agent wallet:', error);
+          return null;
+        }),
+        moneyHackClient.getWallet(accountAddress, authToken).catch((error) => {
+          console.error('Failed to load user wallet:', error);
+          return null;
+        }),
+        moneyHackClient.getAgentEnsConstitution(fetchedAgent.agentId, authToken).catch((error) => {
+          console.error('Failed to load ENS constitution:', error);
+          return null;
+        }),
+      ]);
+
       if (!fetchedPosition) {
         navigator.navigateTo('/setup');
         return;
       }
+
       setPosition(fetchedPosition);
-      setMarketData(fetchedMarketData);
-      setAgent(fetchedAgent);
-      // Fetch wallet balance for deposit functionality
-      try {
-        const fetchedWallet = await moneyHackClient.getWallet(accountAddress, authToken);
-        setWallet(fetchedWallet);
-      } catch (walletError) {
-        console.error('Failed to load wallet:', walletError);
-      }
-      // Fetch ENS constitution
-      try {
-        const fetchedConstitution = await moneyHackClient.getEnsConstitution(accountAddress, authToken);
-        setConstitution(fetchedConstitution);
-      } catch (constitutionError) {
-        console.error('Failed to load ENS constitution:', constitutionError);
-      }
-      // Fetch cross-chain actions
-      try {
-        const fetchedCrossChainActions = await moneyHackClient.getCrossChainActions(accountAddress, 10, authToken);
-        setCrossChainActions(fetchedCrossChainActions);
-      } catch (ccError) {
-        console.error('Failed to load cross-chain actions:', ccError);
-      }
+      setAgentWallet(fetchedAgentWallet);
+      setUserWallet(fetchedUserWallet);
+      setConstitution(fetchedConstitution);
     } catch (error) {
       console.error('Failed to load position:', error);
       toastManager.showTextToast('Failed to load position data', 'error');
@@ -92,7 +104,7 @@ export function AgentPage(): React.ReactElement {
       setIsRefreshing(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accountAddress, authToken, moneyHackClient]);
+  }, [accountAddress, authToken, moneyHackClient, urlAgentId]);
 
   const loadAgentActions = React.useCallback(async (showLoading: boolean = true): Promise<void> => {
     if (!agent || !authToken) return;
@@ -111,16 +123,20 @@ export function AgentPage(): React.ReactElement {
     }
   }, [agent, authToken, moneyHackClient]);
 
+  const prevAgentIdRef = React.useRef<string | undefined>(urlAgentId);
+
   React.useEffect(() => {
     if (!isWeb3AccountLoggedIn) {
       navigator.navigateTo('/');
       return;
     }
-    if (hasLoadedRef.current) return;
+    const agentIdChanged = prevAgentIdRef.current !== urlAgentId;
+    prevAgentIdRef.current = urlAgentId;
+    if (hasLoadedRef.current && !agentIdChanged) return;
     hasLoadedRef.current = true;
     loadData();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isWeb3AccountLoggedIn]);
+  }, [isWeb3AccountLoggedIn, urlAgentId]);
 
   // Load agent actions initially and poll every 10 seconds
   React.useEffect(() => {
@@ -153,7 +169,7 @@ export function AgentPage(): React.ReactElement {
   const handleWithdrawConfirmed = React.useCallback(async (amount: bigint): Promise<void> => {
     if (!accountAddress || !authToken) return;
     try {
-      await moneyHackClient.getWithdrawTransactions(accountAddress, amount, authToken);
+      await moneyHackClient.getWithdrawTransactions(accountAddress, amount, authToken, urlAgentId);
       toastManager.showTextToast('Withdrawal submitted successfully', 'success');
       setIsWithdrawDialogOpen(false);
       loadData(false);
@@ -162,7 +178,7 @@ export function AgentPage(): React.ReactElement {
       toastManager.showTextToast('Withdrawal failed. Please try again.', 'error');
       setIsWithdrawDialogOpen(false);
     }
-  }, [accountAddress, authToken, moneyHackClient, toastManager, loadData]);
+  }, [accountAddress, authToken, moneyHackClient, toastManager, loadData, urlAgentId]);
 
   const handleDepositSuccess = React.useCallback((): void => {
     setIsDepositDialogOpen(false);
@@ -184,8 +200,13 @@ export function AgentPage(): React.ReactElement {
   }, [agentActions]);
 
   const handleClosePositionClicked = React.useCallback((): void => {
-    toastManager.showTextToast('Close position functionality coming soon', 'info');
-  }, [toastManager]);
+    setIsClosePositionDialogOpen(true);
+  }, []);
+
+  const handleClosePositionSuccess = React.useCallback((): void => {
+    setIsClosePositionDialogOpen(false);
+    loadData(false);
+  }, [loadData]);
 
   const handleSendChatMessage = React.useCallback(async (message: string): Promise<ChatMessage[]> => {
     if (!accountAddress || !authToken || !agent || !conversationId) {
@@ -251,6 +272,7 @@ export function AgentPage(): React.ReactElement {
         position={position}
         marketData={marketData}
         agent={agent}
+        constitution={constitution}
         onRefreshClicked={handleRefreshClicked}
         onDepositClicked={handleDepositClicked}
         onDepositUsdcClicked={handleDepositUsdcClicked}
@@ -258,23 +280,6 @@ export function AgentPage(): React.ReactElement {
         onClosePositionClicked={handleClosePositionClicked}
         isRefreshing={isRefreshing}
         latestCriticalMessage={latestCriticalMessage}
-      />
-
-      {constitution && constitution.ensName && (
-        <Box className='statCard' maxWidth='600px' isFullWidth={true}>
-          <Stack direction={Direction.Vertical} shouldAddGutters={true}>
-            <Stack direction={Direction.Horizontal} childAlignment={Alignment.Center} shouldAddGutters={true}>
-              <Text variant='bold'>ENS Constitution</Text>
-              <Stack.Item growthFactor={1} shrinkFactor={1} />
-              <Text variant='note'>{constitution.ensName}</Text>
-            </Stack>
-          </Stack>
-        </Box>
-      )}
-
-      <CrossChainPanel
-        actions={crossChainActions}
-        isLoading={isLoading}
       />
 
       <Box maxWidth='600px' isFullWidth={true} style={{ marginTop: '32px' }}>
@@ -307,23 +312,32 @@ export function AgentPage(): React.ReactElement {
         />
       )}
 
-      {isDepositDialogOpen && position && wallet && agent && (
+      {isDepositDialogOpen && position && userWallet && agent && (
         <DepositDialog
           position={position}
           agentWalletAddress={agent.walletAddress}
-          availableBalance={wallet.assetBalances.find((b) => b.assetAddress.toLowerCase() === position.collateralAsset.address.toLowerCase())?.balance || 0n}
+          availableBalance={userWallet.assetBalances.find((b) => b.assetAddress.toLowerCase() === position.collateralAsset.address.toLowerCase())?.balance || 0n}
           onCloseClicked={(): void => setIsDepositDialogOpen(false)}
           onDepositSuccess={handleDepositSuccess}
         />
       )}
 
-      {isDepositUsdcDialogOpen && position && wallet && agent && (
+      {isDepositUsdcDialogOpen && position && userWallet && agent && (
         <DepositUsdcDialog
           position={position}
           agentWalletAddress={agent.walletAddress}
-          availableUsdcBalance={wallet.assetBalances.find((b) => b.assetAddress.toLowerCase() === '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913')?.balance || 0n}
+          availableUsdcBalance={userWallet.assetBalances.find((b) => b.assetAddress.toLowerCase() === '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913')?.balance || 0n}
           onCloseClicked={(): void => setIsDepositUsdcDialogOpen(false)}
           onDepositSuccess={handleDepositUsdcSuccess}
+        />
+      )}
+
+      {isClosePositionDialogOpen && position && (
+        <ClosePositionDialog
+          position={position}
+          agentId={urlAgentId}
+          onCloseClicked={(): void => setIsClosePositionDialogOpen(false)}
+          onClosePositionSuccess={handleClosePositionSuccess}
         />
       )}
 

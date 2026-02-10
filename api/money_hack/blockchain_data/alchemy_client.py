@@ -331,7 +331,7 @@ class AlchemyClient(BlockchainDataClient):
             logging.info(f'SYNTHETIC_ETH: ETH balance change: {ethChange} wei ({ethChange / 1e18} ETH)')
             if ethChange >= 0:
                 # If eth grew we would have captured that transfer somewhere already
-                logging.info(f'SYNTHETIC_ETH: ETH increased or stayed same, skipping')
+                logging.info('SYNTHETIC_ETH: ETH increased or stayed same, skipping')
                 continue
             logging.info(f'SYNTHETIC_ETH: Creating synthetic ETH withdrawal for {abs(ethChange)} wei')
             syntheticTransfer = ClientWalletErc20Transfer(

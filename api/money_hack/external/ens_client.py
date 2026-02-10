@@ -218,8 +218,8 @@ class EnsClient:
             label.lower(),
             Web3.to_checksum_address(ownerAddress),
             Web3.to_checksum_address(self.resolverAddress),
-            0,       # ttl
-            0,       # fuses (no restrictions)
+            0,  # ttl
+            0,  # fuses (no restrictions)
             expiry,  # expiry (0 = max allowed by parent)
         )
         encoded = fn._encode_transaction_data()

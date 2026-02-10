@@ -79,6 +79,7 @@ class ClosePositionResponse(BaseModel):
     vault_withdraw_amount: str
     morpho_address: str
     vault_address: str
+    transaction_hash: str | None = None
 
 
 class GetMarketDataRequest(BaseModel):
@@ -157,6 +158,18 @@ class CheckEnsNameResponse(BaseModel):
     error: str | None = None
 
 
+class PreviewAgentNameRequest(BaseModel):
+    name: str
+
+
+class PreviewAgentNameResponse(BaseModel):
+    name: str
+    label: str
+    full_ens_name: str
+    available: bool
+    error: str | None = None
+
+
 class GetEnsConfigTransactionsRequest(BaseModel):
     collateral: str | None = None
     target_ltv: int | None = None
@@ -212,12 +225,30 @@ class DeployAgentResponse(BaseModel):
     transaction_hash: str | None = None
 
 
+class RegisterEnsRequest(BaseModel):
+    collateral_asset_address: str
+    target_ltv: float
+
+
+class RegisterEnsResponse(BaseModel):
+    ens_name: str | None = None
+    success: bool = False
+
+
 class GetAgentRequest(BaseModel):
     pass
 
 
 class GetAgentResponse(BaseModel):
     agent: resources.Agent | None
+
+
+class GetAgentsRequest(BaseModel):
+    pass
+
+
+class GetAgentsResponse(BaseModel):
+    agents: list[resources.Agent]
 
 
 class SendChatMessageRequest(BaseModel):
@@ -249,33 +280,25 @@ class GetAgentThoughtsResponse(BaseModel):
     actions: list[resources.AgentActionResource]
 
 
-class GetCrossChainActionsRequest(BaseModel):
-    limit: int = 20
+class GetAgentPositionRequest(BaseModel):
+    pass
 
 
-class GetCrossChainActionsResponse(BaseModel):
-    actions: list[resources.CrossChainActionResource]
+class GetAgentPositionResponse(BaseModel):
+    position: resources.Position | None
 
 
-class CrossChainWithdrawRequest(BaseModel):
-    amount: str
-    to_chain: int
-    to_token: str
-    to_address: str
+class GetAgentWalletRequest(BaseModel):
+    pass
 
 
-class CrossChainWithdrawResponse(BaseModel):
-    action: resources.CrossChainActionResource
+class GetAgentWalletResponse(BaseModel):
+    wallet: resources.Wallet
 
 
-class RecordCrossChainDepositRequest(BaseModel):
-    from_chain: int
-    from_token: str
-    to_token: str
-    amount: str
-    tx_hash: str | None = None
-    bridge_name: str | None = None
+class GetAgentEnsConstitutionRequest(BaseModel):
+    pass
 
 
-class RecordCrossChainDepositResponse(BaseModel):
-    action: resources.CrossChainActionResource
+class GetAgentEnsConstitutionResponse(BaseModel):
+    constitution: resources.EnsConstitutionResource

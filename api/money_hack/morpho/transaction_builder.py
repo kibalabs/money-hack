@@ -22,6 +22,13 @@ def encode_approve(spender: str, amount: int) -> str:
     return str(encoded) if isinstance(encoded, (bytes, str)) else encoded
 
 
+def encode_transfer(recipient: str, amount: int) -> str:
+    contract = w3.eth.contract(abi=morpho_abis.ERC20_ABI)
+    fn = contract.functions.transfer(recipient, amount)
+    encoded = fn._encode_transaction_data()  # noqa: SLF001
+    return str(encoded) if isinstance(encoded, (bytes, str)) else encoded
+
+
 def encode_supply_collateral(
     loan_token: str,
     collateral_token: str,
@@ -81,6 +88,7 @@ def encode_repay(
     lltv: int,
     assets: int,
     on_behalf: str,
+    shares: int = 0,
 ) -> str:
     market_params = (
         Web3.to_checksum_address(loan_token),
@@ -90,7 +98,7 @@ def encode_repay(
         lltv,
     )
     contract = w3.eth.contract(abi=morpho_abis.MORPHO_BLUE_ABI)
-    fn = contract.functions.repay(market_params, assets, 0, Web3.to_checksum_address(on_behalf), b'')
+    fn = contract.functions.repay(market_params, assets, shares, Web3.to_checksum_address(on_behalf), b'')
     encoded = fn._encode_transaction_data()  # noqa: SLF001
     return str(encoded) if isinstance(encoded, (bytes, str)) else encoded
 
@@ -256,6 +264,8 @@ class TransactionBuilder:
         vault_withdraw_amount: int,
         market: 'MorphoMarket',
         needs_usdc_approval: bool,
+        vault_shares: int = 0,
+        borrow_shares: int = 0,
     ) -> list[TransactionCall]:
         return self.build_close_position_transactions(
             user_address=user_address,
@@ -268,6 +278,8 @@ class TransactionBuilder:
             irm=market.irm_address,
             lltv=market.lltv_raw,
             needs_usdc_approval=needs_usdc_approval,
+            vault_shares=vault_shares,
+            borrow_shares=borrow_shares,
         )
 
     def build_close_position_transactions(
@@ -282,32 +294,54 @@ class TransactionBuilder:
         irm: str,
         lltv: int,
         needs_usdc_approval: bool,
+        vault_shares: int = 0,
+        borrow_shares: int = 0,
     ) -> list[TransactionCall]:
-        """Build transactions to fully close a position: withdraw from vault, repay debt, withdraw collateral."""
+        """Build transactions to fully close a position: redeem from vault, repay debt, withdraw collateral."""
         user = chain_util.normalize_address(user_address)
         collateral = chain_util.normalize_address(collateral_address)
         transactions: list[TransactionCall] = []
-        # 1. Withdraw USDC from Yo vault (to get funds to repay)
-        withdraw_calldata = encode_vault_withdraw(assets=vault_withdraw_amount, receiver=user, owner=user)
-        transactions.append(TransactionCall(to=self.yoVaultAddress, data=withdraw_calldata))
-        logging.info(f'Added vault withdraw tx: {vault_withdraw_amount} USDC from Yo vault')
+        # 1. Redeem all shares from Yo vault (to get funds to repay)
+        if vault_shares > 0:
+            redeem_calldata = encode_vault_redeem(shares=vault_shares, receiver=user, owner=user)
+            transactions.append(TransactionCall(to=self.yoVaultAddress, data=redeem_calldata))
+            logging.info(f'Added vault redeem tx: {vault_shares} shares from Yo vault')
+        else:
+            withdraw_calldata = encode_vault_withdraw(assets=vault_withdraw_amount, receiver=user, owner=user)
+            transactions.append(TransactionCall(to=self.yoVaultAddress, data=withdraw_calldata))
+            logging.info(f'Added vault withdraw tx: {vault_withdraw_amount} USDC from Yo vault')
         # 2. Approve USDC to Morpho for repayment (if needed)
         if needs_usdc_approval:
-            usdc_approve_calldata = encode_approve(self.morphoAddress, repay_amount)
+            approve_amount = repay_amount * 2  # Approve extra to cover any interest accrual
+            usdc_approve_calldata = encode_approve(self.morphoAddress, approve_amount)
             transactions.append(TransactionCall(to=self.usdcAddress, data=usdc_approve_calldata))
-            logging.info(f'Added USDC approval tx: USDC -> Morpho for {repay_amount}')
-        # 3. Repay debt to Morpho
-        repay_calldata = encode_repay(
-            loan_token=loan_token,
-            collateral_token=collateral,
-            oracle=oracle,
-            irm=irm,
-            lltv=lltv,
-            assets=repay_amount,
-            on_behalf=user,
-        )
-        transactions.append(TransactionCall(to=self.morphoAddress, data=repay_calldata))
-        logging.info(f'Added repay tx: {repay_amount} USDC to Morpho')
+            logging.info(f'Added USDC approval tx: USDC -> Morpho for {approve_amount}')
+        # 3. Repay debt to Morpho (use shares for exact repayment when available)
+        if borrow_shares > 0:
+            repay_calldata = encode_repay(
+                loan_token=loan_token,
+                collateral_token=collateral,
+                oracle=oracle,
+                irm=irm,
+                lltv=lltv,
+                assets=0,
+                shares=borrow_shares,
+                on_behalf=user,
+            )
+            transactions.append(TransactionCall(to=self.morphoAddress, data=repay_calldata))
+            logging.info(f'Added repay tx: {borrow_shares} borrow shares to Morpho')
+        else:
+            repay_calldata = encode_repay(
+                loan_token=loan_token,
+                collateral_token=collateral,
+                oracle=oracle,
+                irm=irm,
+                lltv=lltv,
+                assets=repay_amount,
+                on_behalf=user,
+            )
+            transactions.append(TransactionCall(to=self.morphoAddress, data=repay_calldata))
+            logging.info(f'Added repay tx: {repay_amount} USDC to Morpho')
         # 4. Withdraw collateral from Morpho
         withdraw_collateral_calldata = encode_withdraw_collateral(
             loan_token=loan_token,
@@ -378,6 +412,89 @@ class TransactionBuilder:
         )
         transactions.append(TransactionCall(to=self.morphoAddress, data=repay_calldata))
         logging.info(f'Added repay tx: {repay_amount} USDC to Morpho')
+        return transactions
+
+    def build_repay_and_withdraw_collateral_transactions_from_market(
+        self,
+        user_address: str,
+        collateral_address: str,
+        collateral_amount: int,
+        repay_amount: int,
+        market: 'MorphoMarket',
+        needs_usdc_approval: bool,
+        borrow_shares: int = 0,
+    ) -> list[TransactionCall]:
+        return self.build_repay_and_withdraw_collateral_transactions(
+            user_address=user_address,
+            collateral_address=collateral_address,
+            collateral_amount=collateral_amount,
+            repay_amount=repay_amount,
+            loan_token=market.loan_address,
+            oracle=market.oracle_address,
+            irm=market.irm_address,
+            lltv=market.lltv_raw,
+            needs_usdc_approval=needs_usdc_approval,
+            borrow_shares=borrow_shares,
+        )
+
+    def build_repay_and_withdraw_collateral_transactions(
+        self,
+        user_address: str,
+        collateral_address: str,
+        collateral_amount: int,
+        repay_amount: int,
+        loan_token: str,
+        oracle: str,
+        irm: str,
+        lltv: int,
+        needs_usdc_approval: bool,
+        borrow_shares: int = 0,
+    ) -> list[TransactionCall]:
+        user = chain_util.normalize_address(user_address)
+        collateral = chain_util.normalize_address(collateral_address)
+        transactions: list[TransactionCall] = []
+        if needs_usdc_approval:
+            approve_amount = repay_amount * 2
+            usdc_approve_calldata = encode_approve(self.morphoAddress, approve_amount)
+            transactions.append(TransactionCall(to=self.usdcAddress, data=usdc_approve_calldata))
+            logging.info(f'Added USDC approval tx: USDC -> Morpho for {approve_amount}')
+        if borrow_shares > 0:
+            repay_calldata = encode_repay(
+                loan_token=loan_token,
+                collateral_token=collateral,
+                oracle=oracle,
+                irm=irm,
+                lltv=lltv,
+                assets=0,
+                shares=borrow_shares,
+                on_behalf=user,
+            )
+            transactions.append(TransactionCall(to=self.morphoAddress, data=repay_calldata))
+            logging.info(f'Added repay tx: {borrow_shares} borrow shares to Morpho')
+        else:
+            repay_calldata = encode_repay(
+                loan_token=loan_token,
+                collateral_token=collateral,
+                oracle=oracle,
+                irm=irm,
+                lltv=lltv,
+                assets=repay_amount,
+                on_behalf=user,
+            )
+            transactions.append(TransactionCall(to=self.morphoAddress, data=repay_calldata))
+            logging.info(f'Added repay tx: {repay_amount} USDC to Morpho')
+        withdraw_collateral_calldata = encode_withdraw_collateral(
+            loan_token=loan_token,
+            collateral_token=collateral,
+            oracle=oracle,
+            irm=irm,
+            lltv=lltv,
+            assets=collateral_amount,
+            on_behalf=user,
+            receiver=user,
+        )
+        transactions.append(TransactionCall(to=self.morphoAddress, data=withdraw_collateral_calldata))
+        logging.info(f'Added withdraw collateral tx: {collateral_amount} from Morpho')
         return transactions
 
     def build_vault_deposit_transactions(

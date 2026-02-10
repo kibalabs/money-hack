@@ -18,15 +18,15 @@ from money_hack.agent.tools import GetPositionTool
 from money_hack.agent.tools import GetPriceAnalysisTool
 from money_hack.agent.tools import SetTargetLtvTool
 from money_hack.agent_manager import AgentManager
-from money_hack.cross_chain_yield_manager import CrossChainManager
-from money_hack.external.lifi_client import LiFiClient
 from money_hack.blockchain_data.alchemy_client import AlchemyClient
 from money_hack.blockchain_data.blockscout_client import BlockscoutClient
 from money_hack.blockchain_data.findblock_client import FindBlockClient
 from money_hack.blockchain_data.moralis_client import MoralisClient
 from money_hack.blockchain_data.price_intelligence_service import PriceIntelligenceService
+from money_hack.cross_chain_yield_manager import CrossChainManager
 from money_hack.external.coinbase_cdp_client import CoinbaseCdpClient
 from money_hack.external.ens_client import EnsClient
+from money_hack.external.lifi_client import LiFiClient
 from money_hack.external.telegram_client import TelegramClient
 from money_hack.forty_acres.forty_acres_client import FortyAcresClient
 from money_hack.morpho.ltv_manager import LtvManager

@@ -113,7 +113,10 @@ async def main() -> None:
                 print(f'  Full name: {ensName}')
                 print(f'  Owner: {walletAddress}')
 
-                from money_hack.external.ens_client import namehash, ENS_NAME_WRAPPER_ADDRESS, ENS_NAME_WRAPPER_ABI, PARENT_NAME
+                from money_hack.external.ens_client import ENS_NAME_WRAPPER_ABI
+                from money_hack.external.ens_client import ENS_NAME_WRAPPER_ADDRESS
+                from money_hack.external.ens_client import PARENT_NAME
+                from money_hack.external.ens_client import namehash
 
                 # Get parent name expiry from NameWrapper (needed for subname expiry)
                 parentNode = namehash(PARENT_NAME)
@@ -150,7 +153,9 @@ async def main() -> None:
                     # Register via NameWrapper with DEPLOYER as owner
                     # (deployer needs to be the NameWrapper token owner to call setText on resolver)
                     subnameTx = ensClient.build_register_subname_transaction(
-                        label=ensLabel, ownerAddress=deployerAddress, expiry=parentExpiry,
+                        label=ensLabel,
+                        ownerAddress=deployerAddress,
+                        expiry=parentExpiry,
                     )
                     txParams: TxParams = {
                         'to': Web3.to_checksum_address(subnameTx.to),
@@ -161,7 +166,7 @@ async def main() -> None:
                     print(f'  View: https://etherscan.io/tx/{txHash}')
 
                 # Update DB
-                updateQuery = sqlalchemy.text("UPDATE tbl_agents SET ens_name = :ens_name WHERE id = CAST(:agent_id AS uuid)").bindparams(ens_name=ensName, agent_id=agentId)
+                updateQuery = sqlalchemy.text('UPDATE tbl_agents SET ens_name = :ens_name WHERE id = CAST(:agent_id AS uuid)').bindparams(ens_name=ensName, agent_id=agentId)
                 await database.execute(query=updateQuery)  # type: ignore[arg-type]
                 print(f'  Updated database with ens_name={ensName}')
 
@@ -175,7 +180,7 @@ async def main() -> None:
             print(f'  pause: {constitution.pause}')
 
             status = await ensClient.read_status(ethClient, ensName)
-            print(f'\n--- Current status ---')
+            print('\n--- Current status ---')
             print(f'  status: {status.status}')
             print(f'  last_action: {status.last_action}')
             print(f'  last_check: {status.last_check}')
@@ -197,7 +202,7 @@ async def main() -> None:
                 lastCheck='pending',
             )
             print(f'  Multicall target: {multicallTx.to}')
-            print(f'  Records: 5 constitution + 3 status = 8 setText calls in 1 transaction')
+            print('  Records: 5 constitution + 3 status = 8 setText calls in 1 transaction')
 
             # Step 4: Submit single transaction via deployer
             print('\n--- Submitting multicall transaction on mainnet ---')

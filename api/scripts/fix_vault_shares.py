@@ -105,7 +105,7 @@ async def main() -> None:
 
                 # Check if we need to update
                 if actualShares == dbVaultShares:
-                    logging.info(f'  ✓ Shares already correct, skipping')
+                    logging.info('  ✓ Shares already correct, skipping')
                     skippedCount += 1
                     continue
 
@@ -123,7 +123,7 @@ async def main() -> None:
                 logging.info(f'  ✓ Updated vault shares from {dbVaultShares} to {actualShares}')
                 updatedCount += 1
 
-            logging.info(f'\n=== Summary ===')
+            logging.info('\n=== Summary ===')
             logging.info(f'Total positions: {len(rows)}')
             logging.info(f'Updated: {updatedCount}')
             logging.info(f'Skipped (already correct): {skippedCount}')

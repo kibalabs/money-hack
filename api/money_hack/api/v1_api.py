@@ -36,7 +36,8 @@ def create_v1_routes(agentManager: AgentManager) -> list[Route]:
     @authorize_signature(authorizer=agentManager)
     async def get_position(request: KibaApiRequest[endpoints.GetPositionRequest]) -> endpoints.GetPositionResponse:
         userAddress = request.path_params.get('userAddress', '')
-        position = await agentManager.get_position(user_address=userAddress)
+        agentId = request.query_params.get('agentId') or None
+        position = await agentManager.get_position(user_address=userAddress, agent_id=agentId)
         return endpoints.GetPositionResponse(position=position)
 
     @json_route(requestType=endpoints.CreatePositionRequest, responseType=endpoints.CreatePositionResponse)
@@ -71,6 +72,13 @@ def create_v1_routes(agentManager: AgentManager) -> list[Route]:
         agent = await agentManager.get_agent(user_address=userAddress)
         return endpoints.GetAgentResponse(agent=agent)
 
+    @json_route(requestType=endpoints.GetAgentsRequest, responseType=endpoints.GetAgentsResponse)
+    @authorize_signature(authorizer=agentManager)
+    async def get_agents(request: KibaApiRequest[endpoints.GetAgentsRequest]) -> endpoints.GetAgentsResponse:
+        userAddress = request.path_params.get('userAddress', '')
+        agents = await agentManager.get_agents(user_address=userAddress)
+        return endpoints.GetAgentsResponse(agents=agents)
+
     @json_route(requestType=endpoints.DeployAgentRequest, responseType=endpoints.DeployAgentResponse)
     @authorize_signature(authorizer=agentManager)
     async def deploy_agent(request: KibaApiRequest[endpoints.DeployAgentRequest]) -> endpoints.DeployAgentResponse:
@@ -85,11 +93,25 @@ def create_v1_routes(agentManager: AgentManager) -> list[Route]:
         )
         return endpoints.DeployAgentResponse(position=position, transaction_hash=transactionHash)
 
+    @json_route(requestType=endpoints.RegisterEnsRequest, responseType=endpoints.RegisterEnsResponse)
+    @authorize_signature(authorizer=agentManager)
+    async def register_ens(request: KibaApiRequest[endpoints.RegisterEnsRequest]) -> endpoints.RegisterEnsResponse:
+        userAddress = request.path_params.get('userAddress', '')
+        agentId = request.path_params.get('agentId', '')
+        ensName = await agentManager.register_ens_for_agent(
+            user_address=userAddress,
+            agent_id=agentId,
+            collateral_asset_address=request.data.collateral_asset_address,
+            target_ltv=request.data.target_ltv,
+        )
+        return endpoints.RegisterEnsResponse(ens_name=ensName, success=ensName is not None)
+
     @json_route(requestType=endpoints.WithdrawRequest, responseType=endpoints.WithdrawResponse)
     @authorize_signature(authorizer=agentManager)
     async def withdraw_usdc(request: KibaApiRequest[endpoints.WithdrawRequest]) -> endpoints.WithdrawResponse:
         userAddress = request.path_params.get('userAddress', '')
-        withdrawData = await agentManager.execute_withdraw(user_address=userAddress, amount=request.data.amount)
+        agentId = request.query_params.get('agentId') or None
+        withdrawData = await agentManager.execute_withdraw(user_address=userAddress, amount=request.data.amount, agent_id=agentId)
         return endpoints.WithdrawResponse(
             transactions=withdrawData.transactions,
             withdraw_amount=withdrawData.withdraw_amount,
@@ -100,14 +122,16 @@ def create_v1_routes(agentManager: AgentManager) -> list[Route]:
     @authorize_signature(authorizer=agentManager)
     async def withdraw_preview(request: KibaApiRequest[endpoints.WithdrawPreviewRequest]) -> endpoints.WithdrawPreviewResponse:
         userAddress = request.path_params.get('userAddress', '')
-        preview = await agentManager.get_withdraw_preview(user_address=userAddress, amount=request.data.amount)
+        agentId = request.query_params.get('agentId') or None
+        preview = await agentManager.get_withdraw_preview(user_address=userAddress, amount=request.data.amount, agent_id=agentId)
         return endpoints.WithdrawPreviewResponse(preview=preview)
 
     @json_route(requestType=endpoints.ClosePositionRequest, responseType=endpoints.ClosePositionResponse)
     @authorize_signature(authorizer=agentManager)
     async def close_position(request: KibaApiRequest[endpoints.ClosePositionRequest]) -> endpoints.ClosePositionResponse:
         userAddress = request.path_params.get('userAddress', '')
-        closeData = await agentManager.get_close_position_transactions(user_address=userAddress)
+        agentId = request.query_params.get('agentId') or None
+        closeData = await agentManager.execute_close_position(user_address=userAddress, agent_id=agentId)
         return endpoints.ClosePositionResponse(
             transactions=closeData.transactions,
             collateral_amount=closeData.collateral_amount,
@@ -115,6 +139,7 @@ def create_v1_routes(agentManager: AgentManager) -> list[Route]:
             vault_withdraw_amount=closeData.vault_withdraw_amount,
             morpho_address=closeData.morpho_address,
             vault_address=closeData.vault_address,
+            transaction_hash=closeData.transaction_hash,
         )
 
     @json_route(requestType=endpoints.GetMarketDataRequest, responseType=endpoints.GetMarketDataResponse)
@@ -174,12 +199,19 @@ def create_v1_routes(agentManager: AgentManager) -> list[Route]:
         isAvailable, fullName, error = agentManager.check_ens_name_available(label=request.data.label)
         return endpoints.CheckEnsNameResponse(label=request.data.label, full_name=fullName, available=isAvailable, error=error)
 
+    @json_route(requestType=endpoints.PreviewAgentNameRequest, responseType=endpoints.PreviewAgentNameResponse)
+    async def preview_agent_name(request: KibaApiRequest[endpoints.PreviewAgentNameRequest]) -> endpoints.PreviewAgentNameResponse:
+        label, fullName, available, error = agentManager.preview_agent_name(name=request.data.name)
+        return endpoints.PreviewAgentNameResponse(name=request.data.name, label=label, full_ens_name=fullName, available=available, error=error)
+
     @json_route(requestType=endpoints.GetEnsConfigTransactionsRequest, responseType=endpoints.GetEnsConfigTransactionsResponse)
     @authorize_signature(authorizer=agentManager)
     async def get_ens_config_transactions(request: KibaApiRequest[endpoints.GetEnsConfigTransactionsRequest]) -> endpoints.GetEnsConfigTransactionsResponse:
         userAddress = request.path_params.get('userAddress', '')
+        agentId = request.query_params.get('agentId') or None
         transactions, ensName = await agentManager.get_ens_config_transactions(
             userAddress=userAddress,
+            agent_id=agentId,
             collateral=request.data.collateral,
             targetLtv=request.data.target_ltv,
             maxLtv=request.data.max_ltv,
@@ -194,13 +226,15 @@ def create_v1_routes(agentManager: AgentManager) -> list[Route]:
     @authorize_signature(authorizer=agentManager)
     async def get_ens_constitution(request: KibaApiRequest[endpoints.GetEnsConstitutionRequest]) -> endpoints.GetEnsConstitutionResponse:
         userAddress = request.path_params.get('userAddress', '')
-        data = await agentManager.get_ens_constitution(userAddress=userAddress)
+        agentId = request.query_params.get('agentId') or None
+        data = await agentManager.get_ens_constitution(userAddress=userAddress, agent_id=agentId)
         return endpoints.GetEnsConstitutionResponse(constitution=EnsConstitutionResource.model_validate(data))
 
     @json_route(requestType=endpoints.SetEnsConstitutionRequest, responseType=endpoints.SetEnsConstitutionResponse)
     @authorize_signature(authorizer=agentManager)
     async def set_ens_constitution(request: KibaApiRequest[endpoints.SetEnsConstitutionRequest]) -> endpoints.SetEnsConstitutionResponse:
         userAddress = request.path_params.get('userAddress', '')
+        agentId = request.query_params.get('agentId') or None
         data = await agentManager.set_ens_constitution(
             userAddress=userAddress,
             maxLtv=request.data.max_ltv,
@@ -208,6 +242,7 @@ def create_v1_routes(agentManager: AgentManager) -> list[Route]:
             maxPositionUsd=request.data.max_position_usd,
             allowedCollateral=request.data.allowed_collateral,
             pause=request.data.pause,
+            agent_id=agentId,
         )
         return endpoints.SetEnsConstitutionResponse(constitution=EnsConstitutionResource.model_validate(data))
 
@@ -268,43 +303,26 @@ def create_v1_routes(agentManager: AgentManager) -> list[Route]:
         )
         return endpoints.GetAgentThoughtsResponse(actions=thoughts)
 
-    @json_route(requestType=endpoints.GetCrossChainActionsRequest, responseType=endpoints.GetCrossChainActionsResponse)
+    @json_route(requestType=endpoints.GetAgentPositionRequest, responseType=endpoints.GetAgentPositionResponse)
     @authorize_signature(authorizer=agentManager)
-    async def get_cross_chain_actions(request: KibaApiRequest[endpoints.GetCrossChainActionsRequest]) -> endpoints.GetCrossChainActionsResponse:
-        userAddress = request.path_params.get('userAddress', '')
-        actions = await agentManager.get_cross_chain_actions(
-            user_address=userAddress,
-            limit=request.data.limit,
-        )
-        return endpoints.GetCrossChainActionsResponse(actions=actions)
+    async def get_agent_position(request: KibaApiRequest[endpoints.GetAgentPositionRequest]) -> endpoints.GetAgentPositionResponse:
+        agentId = request.path_params.get('agentId', '')
+        position = await agentManager.get_agent_position(agent_id=agentId)
+        return endpoints.GetAgentPositionResponse(position=position)
 
-    @json_route(requestType=endpoints.CrossChainWithdrawRequest, responseType=endpoints.CrossChainWithdrawResponse)
+    @json_route(requestType=endpoints.GetAgentWalletRequest, responseType=endpoints.GetAgentWalletResponse)
     @authorize_signature(authorizer=agentManager)
-    async def cross_chain_withdraw(request: KibaApiRequest[endpoints.CrossChainWithdrawRequest]) -> endpoints.CrossChainWithdrawResponse:
-        userAddress = request.path_params.get('userAddress', '')
-        action = await agentManager.execute_cross_chain_withdraw(
-            user_address=userAddress,
-            amount=request.data.amount,
-            to_chain=request.data.to_chain,
-            to_token=request.data.to_token,
-            to_address=request.data.to_address,
-        )
-        return endpoints.CrossChainWithdrawResponse(action=action)
+    async def get_agent_wallet(request: KibaApiRequest[endpoints.GetAgentWalletRequest]) -> endpoints.GetAgentWalletResponse:
+        agentId = request.path_params.get('agentId', '')
+        wallet = await agentManager.get_agent_wallet(agent_id=agentId)
+        return endpoints.GetAgentWalletResponse(wallet=wallet)
 
-    @json_route(requestType=endpoints.RecordCrossChainDepositRequest, responseType=endpoints.RecordCrossChainDepositResponse)
+    @json_route(requestType=endpoints.GetAgentEnsConstitutionRequest, responseType=endpoints.GetAgentEnsConstitutionResponse)
     @authorize_signature(authorizer=agentManager)
-    async def record_cross_chain_deposit(request: KibaApiRequest[endpoints.RecordCrossChainDepositRequest]) -> endpoints.RecordCrossChainDepositResponse:
-        userAddress = request.path_params.get('userAddress', '')
-        action = await agentManager.record_cross_chain_deposit(
-            user_address=userAddress,
-            from_chain=request.data.from_chain,
-            from_token=request.data.from_token,
-            to_token=request.data.to_token,
-            amount=request.data.amount,
-            tx_hash=request.data.tx_hash,
-            bridge_name=request.data.bridge_name,
-        )
-        return endpoints.RecordCrossChainDepositResponse(action=action)
+    async def get_agent_ens_constitution(request: KibaApiRequest[endpoints.GetAgentEnsConstitutionRequest]) -> endpoints.GetAgentEnsConstitutionResponse:
+        agentId = request.path_params.get('agentId', '')
+        constitution = await agentManager.get_agent_ens_constitution(agent_id=agentId)
+        return endpoints.GetAgentEnsConstitutionResponse(constitution=constitution)
 
     return [
         Route('/v1/collaterals', endpoint=get_supported_collaterals, methods=['GET']),
@@ -313,8 +331,10 @@ def create_v1_routes(agentManager: AgentManager) -> list[Route]:
         Route('/v1/users/{userAddress:str}/config', endpoint=get_user_config, methods=['GET']),
         Route('/v1/users/{userAddress:str}/config', endpoint=update_user_config, methods=['POST']),
         Route('/v1/users/{userAddress:str}/agent', endpoint=get_agent, methods=['GET']),
+        Route('/v1/users/{userAddress:str}/agents', endpoint=get_agents, methods=['GET']),
         Route('/v1/users/{userAddress:str}/agent', endpoint=create_agent, methods=['POST']),
         Route('/v1/users/{userAddress:str}/agents/{agentId:str}/deploy', endpoint=deploy_agent, methods=['POST']),
+        Route('/v1/users/{userAddress:str}/agents/{agentId:str}/register-ens', endpoint=register_ens, methods=['POST']),
         Route('/v1/users/{userAddress:str}/position', endpoint=get_position, methods=['GET']),
         Route('/v1/users/{userAddress:str}/position', endpoint=create_position, methods=['POST']),
         Route('/v1/users/{userAddress:str}/position/transactions', endpoint=get_position_transactions, methods=['POST']),
@@ -326,13 +346,14 @@ def create_v1_routes(agentManager: AgentManager) -> list[Route]:
         Route('/v1/users/{userAddress:str}/telegram', endpoint=disconnect_telegram, methods=['DELETE']),
         Route('/v1/telegram-webhook', endpoint=process_telegram_webhook, methods=['POST']),
         Route('/v1/ens/check-name', endpoint=check_ens_name, methods=['POST']),
+        Route('/v1/agent-name/preview', endpoint=preview_agent_name, methods=['POST']),
         Route('/v1/users/{userAddress:str}/ens/config-transactions', endpoint=get_ens_config_transactions, methods=['POST']),
         Route('/v1/users/{userAddress:str}/ens/constitution', endpoint=get_ens_constitution, methods=['GET']),
         Route('/v1/users/{userAddress:str}/ens/constitution', endpoint=set_ens_constitution, methods=['POST']),
         Route('/v1/users/{userAddress:str}/agents/{agentId:str}/chat', endpoint=send_chat_message, methods=['POST']),
         Route('/v1/users/{userAddress:str}/agents/{agentId:str}/chat/history', endpoint=get_chat_history, methods=['GET']),
         Route('/v1/agents/{agentId:str}/thoughts', endpoint=get_agent_thoughts, methods=['GET']),
-        Route('/v1/users/{userAddress:str}/cross-chain-actions', endpoint=get_cross_chain_actions, methods=['GET']),
-        Route('/v1/users/{userAddress:str}/cross-chain-withdraw', endpoint=cross_chain_withdraw, methods=['POST']),
-        Route('/v1/users/{userAddress:str}/cross-chain-deposit', endpoint=record_cross_chain_deposit, methods=['POST']),
+        Route('/v1/agents/{agentId:str}/position', endpoint=get_agent_position, methods=['GET']),
+        Route('/v1/agents/{agentId:str}/wallet', endpoint=get_agent_wallet, methods=['GET']),
+        Route('/v1/agents/{agentId:str}/ens-constitution', endpoint=get_agent_ens_constitution, methods=['GET']),
     ]

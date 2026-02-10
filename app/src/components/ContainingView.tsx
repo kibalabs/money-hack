@@ -15,12 +15,10 @@ export function ContainingView(props: IContainingViewProps): React.ReactElement 
   const { isWeb3AccountConnecting, isWeb3AccountLoggedIn } = useAuth();
 
   React.useEffect((): void => {
-    // If logged in, redirect to agent page
     if (isWeb3AccountLoggedIn && location.pathname === '/') {
-      navigator.navigateTo('/agent');
+      navigator.navigateTo('/agents');
     }
-    // If not logged in and on agent page, redirect to home
-    if (!isWeb3AccountConnecting && !isWeb3AccountLoggedIn && location.pathname === '/agent') {
+    if (!isWeb3AccountConnecting && !isWeb3AccountLoggedIn && (location.pathname === '/agent' || location.pathname === '/agents')) {
       navigator.navigateTo('/');
     }
   }, [isWeb3AccountConnecting, isWeb3AccountLoggedIn, location.pathname, navigator]);

@@ -1,4 +1,3 @@
-from core import logging
 from core.requester import Requester
 from pydantic import BaseModel
 

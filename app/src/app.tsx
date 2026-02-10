@@ -12,7 +12,7 @@ import { MoneyHackClient } from './client/client';
 import { ContainingView } from './components/ContainingView';
 import { GlobalsProvider, IGlobals } from './GlobalsContext';
 import { PageDataProvider } from './PageDataContext';
-import { AccountPage, AgentPage, CreateAgentPage, DeployAgentPage, FundAgentPage, HomePage } from './pages';
+import { AccountPage, AgentPage, AgentsPage, CreateAgentPage, DeployAgentPage, FundAgentPage, HomePage } from './pages';
 import { getIsNextVersion, usePrefersDarkMode } from './util';
 
 declare global {
@@ -68,6 +68,7 @@ const routes: IRoute<IGlobals>[] = [
   { path: '/fund-agent', page: FundAgentPage },
   { path: '/deploy-agent', page: DeployAgentPage },
   { path: '/account', page: AccountPage },
+  { path: '/agents', page: AgentsPage },
   { path: '/agent', page: AgentPage },
   { path: '/', page: HomePage },
 ];

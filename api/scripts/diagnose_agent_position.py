@@ -101,7 +101,7 @@ async def main() -> None:
                 print(f'{"=" * 80}')
 
                 # 1. Wallet balances (ERC20 balanceOf)
-                print(f'\n--- WALLET BALANCES ---')
+                print('\n--- WALLET BALANCES ---')
 
                 # cbBTC balance
                 cbbtcResponse = await ethClient.call_function_by_name(
@@ -134,7 +134,7 @@ async def main() -> None:
                 print(f'  USDC:   {usdcBalance} raw = ${usdcBalance / 1e6:.6f}')
 
                 # 2. Morpho Blue position
-                print(f'\n--- MORPHO BLUE POSITION ---')
+                print('\n--- MORPHO BLUE POSITION ---')
                 marketIdBytes = bytes.fromhex(morphoMarketId[2:]) if morphoMarketId.startswith('0x') else bytes.fromhex(morphoMarketId)
 
                 positionResponse = await ethClient.call_function_by_name(
@@ -170,7 +170,7 @@ async def main() -> None:
                 print(f'  Borrow Amount:  {borrowAmount} raw = ${borrowAmount / 1e6:.6f} USDC')
 
                 # 3. Yo Vault balance
-                print(f'\n--- YO VAULT BALANCE ---')
+                print('\n--- YO VAULT BALANCE ---')
                 sharesResponse = await ethClient.call_function_by_name(
                     toAddress=YO_VAULT_ADDRESS,
                     contractAbi=morpho_abis.ERC4626_VAULT_ABI,
@@ -191,7 +191,7 @@ async def main() -> None:
                 print(f'  Vault Assets:   {vaultAssets} raw = ${vaultAssets / 1e6:.6f} USDC')
 
                 # 4. Overall summary
-                print(f'\n--- OVERALL AGENT STATE ---')
+                print('\n--- OVERALL AGENT STATE ---')
                 print(f'  Wallet {collateralSymbol}:      {collateralAmount / (10**collateralDecimals):.8f} (in Morpho as collateral)')
                 print(f'  Wallet {collateralSymbol} free:  {cbbtcBalance / 1e8:.8f} (in wallet, not deposited)')
                 print(f'  USDC borrowed:       ${borrowAmount / 1e6:.6f}')
@@ -199,9 +199,9 @@ async def main() -> None:
                 print(f'  USDC in wallet:      ${usdcBalance / 1e6:.6f}')
                 if collateralAmount > 0:
                     # We can't get price here easily, but we can compute LTV from the data we have
-                    print(f'  Current LTV:         needs price to calculate')
+                    print('  Current LTV:         needs price to calculate')
                 else:
-                    print(f'  Current LTV:         N/A (no collateral in Morpho)')
+                    print('  Current LTV:         N/A (no collateral in Morpho)')
                 print(f'  Target LTV:          {targetLtv:.2%}')
 
     finally:

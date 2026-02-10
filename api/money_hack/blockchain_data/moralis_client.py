@@ -28,7 +28,7 @@ class MoralisClient(BlockchainDataClient):
             'chain': hex(chainId),
             'addresses[0]': assetAddress,
         }
-        url = f'https://deep-index.moralis.io/api/v2.2/erc20/metadata'
+        url = 'https://deep-index.moralis.io/api/v2.2/erc20/metadata'
         headers = {'X-API-Key': self.apiKey, 'accept': 'application/json'}
         response = await self.requester.get(url=url, headers=headers, dataDict=dataDict, timeout=60)
         responseData = response.json()
@@ -70,7 +70,7 @@ class MoralisClient(BlockchainDataClient):
                 'chain': hex(chainId),
                 'date': date_util.datetime_to_string(dt=date_util.datetime_from_date(date=date), dateFormat='%Y-%m-%d'),
             }
-            url = f'https://deep-index.moralis.io/api/v2.2/dateToBlock'
+            url = 'https://deep-index.moralis.io/api/v2.2/dateToBlock'
             headers = {'X-API-Key': self.apiKey, 'accept': 'application/json'}
             priceResponse = await self.requester.get(url=url, headers=headers, dataDict=dataDict, timeout=60)
             blockResponseData = priceResponse.json()

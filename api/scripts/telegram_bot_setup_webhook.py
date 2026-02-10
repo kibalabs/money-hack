@@ -26,7 +26,7 @@ async def setup_webhook_if_needed(agentManager: AgentManager, webhookUrl: str) -
     except Exception as e:  # noqa: BLE001
         print(f'❌ Failed to set webhook: {e}')
         return
-    print(f'✅ Webhook set successfully!')
+    print('✅ Webhook set successfully!')
 
 
 @click.command()

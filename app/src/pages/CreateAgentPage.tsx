@@ -4,7 +4,7 @@ import { useNavigator } from '@kibalabs/core-react';
 import { Alignment, Box, Direction, Image, LoadingSpinner, MarkdownText, PaddingSize, SingleLineInput, Spacing, Stack, Text, TextAlignment } from '@kibalabs/ui-react';
 
 import { useAuth } from '../AuthContext';
-import { Agent, CollateralAsset, MarketData, Wallet } from '../client/resources';
+import { CollateralAsset, MarketData, Wallet } from '../client/resources';
 import { ContainingView } from '../components/ContainingView';
 import { GlowingButton, GlowingText } from '../components/GlowingButton';
 import { LoadingIndicator } from '../components/LoadingIndicator';
@@ -74,9 +74,11 @@ export function CreateAgentPage(): React.ReactElement {
   const [error, setError] = React.useState<string | null>(null);
   const [isLoadingCollaterals, setIsLoadingCollaterals] = React.useState<boolean>(true);
   const [isCreatingAgent, setIsCreatingAgent] = React.useState<boolean>(false);
-  const [existingAgent, setExistingAgent] = React.useState<Agent | null>(null);
   const [marketData, setMarketData] = React.useState<MarketData | null>(null);
   const [userWallet, setUserWallet] = React.useState<Wallet | null>(null);
+  const [ensPreview, setEnsPreview] = React.useState<{ label: string; fullEnsName: string; available: boolean; error: string | null } | null>(null);
+  const [isCheckingName, setIsCheckingName] = React.useState<boolean>(false);
+  const nameCheckTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   React.useEffect((): void => {
     if (!accountAddress || !authToken) {
       navigator.navigateTo('/');
@@ -84,19 +86,24 @@ export function CreateAgentPage(): React.ReactElement {
     }
     const loadData = async (): Promise<void> => {
       try {
-        const [fetchedCollaterals, fetchedAgent, fetchedMarketData, fetchedWallet] = await Promise.all([
+        const [fetchedCollaterals, fetchedMarketData, fetchedWallet] = await Promise.all([
           moneyHackClient.getSupportedCollaterals(authToken),
-          moneyHackClient.getAgent(accountAddress, authToken),
           moneyHackClient.getMarketData(),
           moneyHackClient.getWallet(accountAddress, authToken),
         ]);
         setCollaterals(fetchedCollaterals);
         setMarketData(fetchedMarketData);
         setUserWallet(fetchedWallet);
-        if (fetchedAgent) {
-          setExistingAgent(fetchedAgent);
-          setAgentName(fetchedAgent.name);
-          setSelectedEmoji(fetchedAgent.emoji);
+        try {
+          const preview = await moneyHackClient.previewAgentName('BorrowBot 1');
+          setEnsPreview({
+            label: preview.label,
+            fullEnsName: preview.fullEnsName,
+            available: preview.available,
+            error: preview.error,
+          });
+        } catch (previewError) {
+          console.error('Failed to preview initial agent name:', previewError);
         }
       } catch (caughtError) {
         console.error('Failed to load data:', caughtError);
@@ -127,6 +134,29 @@ export function CreateAgentPage(): React.ReactElement {
   const onAgentNameChanged = (value: string): void => {
     setAgentName(value);
     setError(null);
+    if (nameCheckTimeoutRef.current) {
+      clearTimeout(nameCheckTimeoutRef.current);
+    }
+    if (!value.trim()) {
+      setEnsPreview(null);
+      return;
+    }
+    setIsCheckingName(true);
+    nameCheckTimeoutRef.current = setTimeout(async () => {
+      try {
+        const preview = await moneyHackClient.previewAgentName(value.trim());
+        setEnsPreview({
+          label: preview.label,
+          fullEnsName: preview.fullEnsName,
+          available: preview.available,
+          error: preview.error,
+        });
+      } catch (previewError) {
+        console.error('Failed to preview agent name:', previewError);
+      } finally {
+        setIsCheckingName(false);
+      }
+    }, 300);
   };
   const onEmojiSelected = (emoji: string): void => {
     setSelectedEmoji(emoji);
@@ -147,10 +177,7 @@ export function CreateAgentPage(): React.ReactElement {
     setIsCreatingAgent(true);
     setError(null);
     try {
-      let agent = existingAgent;
-      if (!agent) {
-        agent = await moneyHackClient.createAgent(accountAddress, agentName.trim(), selectedEmoji, authToken);
-      }
+      const agent = await moneyHackClient.createAgent(accountAddress, agentName.trim(), selectedEmoji, authToken);
       const params = new URLSearchParams({
         collateral: selectedCollateral.address,
         agentId: agent.agentId,
@@ -238,9 +265,6 @@ export function CreateAgentPage(): React.ReactElement {
                                 {userBalance ? `$${userBalance.balanceUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '$0.00'}
                               </Text>
                             </Stack>
-                            {selectedCollateral?.address === collateral.address && (
-                              <Text variant='success'>✓</Text>
-                            )}
                           </Stack>
                           <Stack direction={Direction.Horizontal} shouldAddGutters={true} childAlignment={Alignment.Center} contentAlignment={Alignment.Start} isFullWidth={true}>
                             <Stack direction={Direction.Vertical} childAlignment={Alignment.Start}>
@@ -291,6 +315,22 @@ export function CreateAgentPage(): React.ReactElement {
                   value={agentName}
                   onValueChanged={onAgentNameChanged}
                 />
+                {ensPreview && (
+                  <Stack direction={Direction.Horizontal} shouldAddGutters={true} childAlignment={Alignment.Center} contentAlignment={Alignment.End}>
+                    <Text variant='note' style={{ color: ensPreview.available ? '#10b981' : '#ef4444', fontFamily: 'monospace' }}>
+                      {ensPreview.fullEnsName}
+                    </Text>
+                    <Text variant='note' style={{ color: ensPreview.available ? '#10b981' : '#ef4444' }}>
+                      {ensPreview.available ? '✓' : '✗'}
+                    </Text>
+                  </Stack>
+                )}
+                {isCheckingName && (
+                  <Text variant='note' style={{ opacity: 0.5 }}>Checking name...</Text>
+                )}
+                {ensPreview?.error && (
+                  <Text variant='note' style={{ color: '#ef4444' }}>{ensPreview.error}</Text>
+                )}
                 <Spacing />
                 <Text variant='note'>Agent Icon</Text>
                 <EmojiPicker
@@ -323,9 +363,9 @@ export function CreateAgentPage(): React.ReactElement {
                   <Stack.Item growthFactor={1} shrinkFactor={1}>
                     <GlowingButton
                       variant='primary-large'
-                      text={isCreatingAgent ? 'Creating...' : (existingAgent ? 'Continue' : 'Create Agent')}
+                      text={isCreatingAgent ? 'Creating...' : 'Create Agent'}
                       onClicked={onCreateAgentClicked}
-                      isEnabled={agentName.trim() !== '' && !isCreatingAgent}
+                      isEnabled={agentName.trim() !== '' && !isCreatingAgent && ensPreview?.available !== false}
                       isFullWidth={true}
                       isLoading={isCreatingAgent}
                     />

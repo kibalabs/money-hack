@@ -1,8 +1,8 @@
 import React from 'react';
 
-import { Alignment, Box, Button, Direction, Image, KibaIcon, PaddingSize, Spacing, Stack, Text } from '@kibalabs/ui-react';
+import { Alignment, Box, Button, Direction, Image, KibaIcon, LinkBase, PaddingSize, Spacing, Stack, Text } from '@kibalabs/ui-react';
 
-import { Agent, CollateralMarketData, MarketData, Position } from '../client/resources';
+import { Agent, CollateralMarketData, EnsConstitution, MarketData, Position } from '../client/resources';
 
 import './PositionDashboard.scss';
 
@@ -10,6 +10,7 @@ interface IPositionDashboardProps {
   position: Position;
   marketData: MarketData | null;
   agent: Agent | null;
+  constitution: EnsConstitution | null;
   latestCriticalMessage: string | null;
   onRefreshClicked: () => void;
   onDepositClicked: () => void;
@@ -40,6 +41,20 @@ const formatAmount = (amount: bigint, decimals: number): string => {
   if (value < 1) return value.toFixed(4);
   if (value < 1000) return value.toFixed(4);
   return value.toLocaleString('en-US', { maximumFractionDigits: 2 });
+};
+
+const formatExactAmount = (amount: bigint, decimals: number): string => {
+  const whole = amount / BigInt(10 ** decimals);
+  const fraction = amount % BigInt(10 ** decimals);
+  const fractionText = fraction.toString().padStart(decimals, '0');
+  return `${whole.toString()}.${fractionText}`;
+};
+
+const formatUsdcRaw = (amount: bigint): string => {
+  const whole = amount / 1000000n;
+  const fraction = amount % 1000000n;
+  const fractionText = fraction.toString().padStart(6, '0');
+  return `${whole.toString()}.${fractionText}`;
 };
 
 const getHealthStatus = (ltv: number, maxLtv: number, canAgentManage: boolean): 'healthy' | 'warning' | 'danger' => {
@@ -77,20 +92,40 @@ export function PositionDashboard(props: IPositionDashboardProps): React.ReactEl
   const totalDebtUsd = props.position.borrowValueUsd;
   const netPositionUsd = totalAssetsUsd - totalDebtUsd;
 
+  const closeShortfallRaw = React.useMemo((): bigint => {
+    const availableUsdcRaw = props.position.vaultBalance + props.position.walletUsdcBalance;
+    if (props.position.borrowAmount > availableUsdcRaw) {
+      return props.position.borrowAmount - availableUsdcRaw;
+    }
+    return 0n;
+  }, [props.position.borrowAmount, props.position.vaultBalance, props.position.walletUsdcBalance]);
+
   const usdcLogoUri = 'https://assets.coingecko.com/coins/images/6319/small/usdc.png';
 
   return (
     <Stack className='positionDashboard' direction={Direction.Vertical} shouldAddGutters={true} childAlignment={Alignment.Center}>
-      <Stack direction={Direction.Horizontal} childAlignment={Alignment.Center} contentAlignment={Alignment.Center} shouldAddGutters={true} isFullWidth={true}>
-        <Text variant='header2'>{props.agent ? `${props.agent.emoji} ${props.agent.name}` : 'Position Dashboard'}</Text>
-        <Stack.Item growthFactor={1} shrinkFactor={1} />
-        <Button
-          variant='tertiary-small'
-          iconLeft={<KibaIcon iconId='ion-refresh' />}
-          text='Refresh'
-          onClicked={props.onRefreshClicked}
-          isLoading={props.isRefreshing}
-        />
+      <Stack direction={Direction.Vertical} childAlignment={Alignment.Center} shouldAddGutters={true} isFullWidth={true}>
+        <Stack direction={Direction.Horizontal} childAlignment={Alignment.Center} contentAlignment={Alignment.Center} shouldAddGutters={true} isFullWidth={true}>
+          <Text variant='header2'>{props.agent ? `${props.agent.emoji} ${props.agent.name}` : 'Position Dashboard'}</Text>
+          <Stack.Item growthFactor={1} shrinkFactor={1} />
+          <Button
+            variant='tertiary-small'
+            iconLeft={<KibaIcon iconId='ion-refresh' />}
+            text='Refresh'
+            onClicked={props.onRefreshClicked}
+            isLoading={props.isRefreshing}
+          />
+        </Stack>
+        {props.constitution && props.constitution.ensName && (
+          <LinkBase
+            target={`https://app.ens.domains/${props.constitution.ensName}`}
+            isOpeningInNewTab={true}
+          >
+            <Text variant='note' style={{ color: '#3b82f6', textDecoration: 'underline' }}>
+              {props.constitution.ensName}
+            </Text>
+          </LinkBase>
+        )}
       </Stack>
 
       <Spacing variant={PaddingSize.Default} />
@@ -143,53 +178,6 @@ export function PositionDashboard(props: IPositionDashboardProps): React.ReactEl
         </Stack>
       </Box>
 
-      {/* Idle Wallet Assets */}
-      {(props.position.walletCollateralBalance > 0n || props.position.walletUsdcBalance > 0n) && (
-        <Box className='statCard' isFullWidth={true}>
-          <Stack direction={Direction.Vertical} shouldAddGutters={true}>
-            <Text variant='bold'>Idle in Wallet</Text>
-            <Text variant='note'>The agent will deploy these shortly</Text>
-            <Spacing variant={PaddingSize.Narrow} />
-            {props.position.walletCollateralBalance > 0n && (
-              <Stack direction={Direction.Horizontal} childAlignment={Alignment.Center} shouldAddGutters={true}>
-                {props.position.collateralAsset.logoUri && (
-                  <Box width='28px' height='28px'>
-                    <Image
-                      source={props.position.collateralAsset.logoUri}
-                      alternativeText={props.position.collateralAsset.symbol}
-                      isFullWidth={true}
-                      isFullHeight={true}
-                    />
-                  </Box>
-                )}
-                <Text>{props.position.collateralAsset.symbol}</Text>
-                <Stack.Item growthFactor={1} shrinkFactor={1} />
-                <Stack direction={Direction.Vertical} childAlignment={Alignment.End}>
-                  <Text variant='bold'>
-                    {formatAmount(props.position.walletCollateralBalance, props.position.collateralAsset.decimals)}
-                  </Text>
-                  <Text variant='note'>{formatUsd(props.position.walletCollateralBalanceUsd)}</Text>
-                </Stack>
-              </Stack>
-            )}
-            {props.position.walletUsdcBalance > 0n && (
-              <Stack direction={Direction.Horizontal} childAlignment={Alignment.Center} shouldAddGutters={true}>
-                <Box width='28px' height='28px'>
-                  <Image
-                    source={usdcLogoUri}
-                    alternativeText='USDC'
-                    isFullWidth={true}
-                    isFullHeight={true}
-                  />
-                </Box>
-                <Text>USDC</Text>
-                <Stack.Item growthFactor={1} shrinkFactor={1} />
-                <Text variant='bold'>{formatUsd(props.position.walletUsdcBalanceUsd)}</Text>
-              </Stack>
-            )}
-          </Stack>
-        </Box>
-      )}
 
       {/* Assets (what you own) */}
       <Box className='statCard' isFullWidth={true}>
@@ -216,10 +204,12 @@ export function PositionDashboard(props: IPositionDashboardProps): React.ReactEl
             </Stack>
             <Stack.Item growthFactor={1} shrinkFactor={1} />
             <Stack direction={Direction.Vertical} childAlignment={Alignment.End}>
-              <Text variant='bold'>
-                {formatAmount(props.position.collateralAmount, props.position.collateralAsset.decimals)}
+              <Text variant='bold'>{formatUsd(props.position.collateralValueUsd)}</Text>
+              <Text variant='note'>
+                {formatExactAmount(props.position.collateralAmount, props.position.collateralAsset.decimals)}
+                {' '}
+                {props.position.collateralAsset.symbol}
               </Text>
-              <Text variant='note'>{formatUsd(props.position.collateralValueUsd)}</Text>
             </Stack>
           </Stack>
           <Stack direction={Direction.Horizontal} childAlignment={Alignment.Center} shouldAddGutters={true}>
@@ -240,8 +230,63 @@ export function PositionDashboard(props: IPositionDashboardProps): React.ReactEl
               </Text>
             </Stack>
             <Stack.Item growthFactor={1} shrinkFactor={1} />
-            <Text variant='bold'>{formatUsd(props.position.vaultBalanceUsd)}</Text>
+            <Stack direction={Direction.Vertical} childAlignment={Alignment.End}>
+              <Text variant='bold'>{formatUsd(props.position.vaultBalanceUsd)}</Text>
+              <Text variant='note'>
+                {formatExactAmount(props.position.vaultBalance, 6)} USDC
+              </Text>
+            </Stack>
           </Stack>
+          {props.position.walletUsdcBalance > 0n && (
+            <Stack direction={Direction.Horizontal} childAlignment={Alignment.Center} shouldAddGutters={true}>
+              <Box width='28px' height='28px'>
+                <Image
+                  source={usdcLogoUri}
+                  alternativeText='USDC'
+                  isFullWidth={true}
+                  isFullHeight={true}
+                />
+              </Box>
+              <Stack direction={Direction.Vertical}>
+                <Text>USDC in Wallet</Text>
+                <Text variant='note'>Idle</Text>
+              </Stack>
+              <Stack.Item growthFactor={1} shrinkFactor={1} />
+              <Stack direction={Direction.Vertical} childAlignment={Alignment.End}>
+                <Text variant='bold'>{formatUsd(props.position.walletUsdcBalanceUsd)}</Text>
+                <Text variant='note'>
+                  {formatExactAmount(props.position.walletUsdcBalance, 6)} USDC
+                </Text>
+              </Stack>
+            </Stack>
+          )}
+          {props.position.walletCollateralBalance > 0n && (
+            <Stack direction={Direction.Horizontal} childAlignment={Alignment.Center} shouldAddGutters={true}>
+              {props.position.collateralAsset.logoUri && (
+                <Box width='28px' height='28px'>
+                  <Image
+                    source={props.position.collateralAsset.logoUri}
+                    alternativeText={props.position.collateralAsset.symbol}
+                    isFullWidth={true}
+                    isFullHeight={true}
+                  />
+                </Box>
+              )}
+              <Stack direction={Direction.Vertical}>
+                <Text>{props.position.collateralAsset.symbol} in Wallet</Text>
+                <Text variant='note'>Idle</Text>
+              </Stack>
+              <Stack.Item growthFactor={1} shrinkFactor={1} />
+              <Stack direction={Direction.Vertical} childAlignment={Alignment.End}>
+                <Text variant='bold'>{formatUsd(props.position.walletCollateralBalanceUsd)}</Text>
+                <Text variant='note'>
+                  {formatExactAmount(props.position.walletCollateralBalance, props.position.collateralAsset.decimals)}
+                  {' '}
+                  {props.position.collateralAsset.symbol}
+                </Text>
+              </Stack>
+            </Stack>
+          )}
         </Stack>
       </Box>
 
@@ -268,13 +313,13 @@ export function PositionDashboard(props: IPositionDashboardProps): React.ReactEl
               </Text>
             </Stack>
             <Stack.Item growthFactor={1} shrinkFactor={1} />
-            <Text variant='bold'>{formatUsd(props.position.borrowValueUsd)}</Text>
+            <Stack direction={Direction.Vertical} childAlignment={Alignment.End}>
+              <Text variant='bold'>{formatUsd(props.position.borrowValueUsd)}</Text>
+              <Text variant='note'>
+                {formatExactAmount(props.position.borrowAmount, 6)} USDC
+              </Text>
+            </Stack>
           </Stack>
-          <Text variant='note'>
-            {'To close: repay '}
-            {formatUsd(props.position.borrowValueUsd)}
-            {' to unlock collateral'}
-          </Text>
         </Stack>
       </Box>
 
@@ -340,6 +385,11 @@ export function PositionDashboard(props: IPositionDashboardProps): React.ReactEl
       {/* Actions */}
       <Spacing variant={PaddingSize.Wide} />
       <Stack direction={Direction.Vertical} shouldAddGutters={true} isFullWidth={true}>
+        {closeShortfallRaw > 0n && (
+          <Stack direction={Direction.Vertical} shouldAddGutters={true}>
+            <Text variant='note-warning'>You need {formatUsdcRaw(closeShortfallRaw)} USDC (${formatUsdcRaw(closeShortfallRaw)}) to fully repay the loan. Deposit more USDC before closing.</Text>
+          </Stack>
+        )}
         <Stack direction={Direction.Horizontal} shouldAddGutters={true} isFullWidth={true}>
           <Stack.Item growthFactor={1} shrinkFactor={1}>
             <Button

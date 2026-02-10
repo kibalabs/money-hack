@@ -34,11 +34,11 @@ from money_hack.api.authorizer import Authorizer
 from money_hack.api.v1_resources import Agent as AgentResource
 from money_hack.api.v1_resources import AgentActionResource
 from money_hack.api.v1_resources import AssetBalance
-from money_hack.api.v1_resources import CrossChainActionResource
 from money_hack.api.v1_resources import AuthToken
 from money_hack.api.v1_resources import ClosePositionTransactionsData
 from money_hack.api.v1_resources import CollateralAsset
 from money_hack.api.v1_resources import CollateralMarketData
+from money_hack.api.v1_resources import EnsConstitutionResource
 from money_hack.api.v1_resources import Position
 from money_hack.api.v1_resources import PositionTransactionsData
 from money_hack.api.v1_resources import TransactionCall
@@ -49,18 +49,24 @@ from money_hack.api.v1_resources import WithdrawTransactionsData
 from money_hack.blockchain_data.alchemy_client import AlchemyClient
 from money_hack.blockchain_data.moralis_client import MoralisClient
 from money_hack.blockchain_data.price_intelligence_service import PriceIntelligenceService
+from money_hack.cross_chain_yield_manager import CrossChainManager
 from money_hack.external.coinbase_cdp_client import CoinbaseCdpClient
+from money_hack.external.ens_client import ENS_NAME_WRAPPER_ABI
+from money_hack.external.ens_client import ENS_NAME_WRAPPER_ADDRESS
+from money_hack.external.ens_client import PARENT_NAME
 from money_hack.external.ens_client import EnsAgentConfig
 from money_hack.external.ens_client import EnsClient
 from money_hack.external.ens_client import EnsConstitution
+from money_hack.external.ens_client import namehash
+from money_hack.external.lifi_client import LiFiClient
 from money_hack.external.telegram_client import TelegramClient
 from money_hack.forty_acres.forty_acres_client import FortyAcresClient
 from money_hack.morpho import morpho_abis
-from money_hack.cross_chain_yield_manager import CrossChainManager
-from money_hack.external.lifi_client import LiFiClient
 from money_hack.morpho.ltv_manager import LtvManager
 from money_hack.morpho.morpho_client import MorphoClient
+from money_hack.morpho.transaction_builder import MORPHO_BLUE_ADDRESS
 from money_hack.morpho.transaction_builder import TransactionBuilder
+from money_hack.morpho.transaction_builder import encode_transfer
 from money_hack.notification_service import NotificationService
 from money_hack.smart_wallets.coinbase_bundler import CoinbaseBundler
 from money_hack.smart_wallets.coinbase_constants import COINBASE_EIP7702PROXY_ADDRESS
@@ -251,12 +257,13 @@ class AgentManager(Authorizer):  # Core manager
             raise KibaException('Coinbase CDP client not configured')
         normalizedAddress = chain_util.normalize_address(user_address)
         user = await self.databaseStore.get_or_create_user_by_wallet(walletAddress=normalizedAddress)
-        existingAgents = await self.databaseStore.get_agents_by_user(userId=user.userId)
-        if existingAgents:
-            raise KibaException('User already has an agent')
+        ensLabel = self.normalize_agent_name(name)
+        if not self.ensClient.check_name_available(ensLabel):
+            raise BadRequestException(message=f'Agent name "{name}" is already taken (resolves to {ensLabel}.borrowbott.eth)')
         agentId = str(uuid.uuid4())
         walletAddress = await self.coinbaseCdpClient.create_eoa(name=agentId)
         agent = await self.databaseStore.create_agent(userId=user.userId, name=name, emoji=emoji, walletAddress=walletAddress)
+        self.ensClient.reserve_name(ensLabel)
         return AgentResource(
             agent_id=agent.agentId,
             name=agent.name,
@@ -286,6 +293,25 @@ class AgentManager(Authorizer):  # Core manager
             created_date=agent.createdDate,
         )
 
+    async def get_agents(self, user_address: str) -> list[AgentResource]:
+        normalizedAddress = chain_util.normalize_address(user_address)
+        user = await self.databaseStore.get_user_by_wallet(walletAddress=normalizedAddress)
+        if user is None:
+            return []
+        agents = await self.databaseStore.get_agents_by_user(userId=user.userId)
+        return [
+            AgentResource(
+                agent_id=agent.agentId,
+                name=agent.name,
+                emoji=agent.emoji,
+                agent_index=agent.agentIndex,
+                wallet_address=agent.walletAddress,
+                ens_name=agent.ensName,
+                created_date=agent.createdDate,
+            )
+            for agent in agents
+        ]
+
     async def deploy_agent(self, user_address: str, agent_id: str, collateral_asset_address: str, collateral_amount: str, target_ltv: float) -> tuple[Position, str | None]:
         if self.coinbaseCdpClient is None:
             raise KibaException('Coinbase CDP client not configured')
@@ -296,7 +322,6 @@ class AgentManager(Authorizer):  # Core manager
         agent = await self.databaseStore.get_agent_by_id(agentId=agent_id)
         if agent is None or agent.userId != user.userId:
             raise KibaException('Agent not found')
-        # ENS subname registration happens on mainnet via scripts/set_ens_constitution.py
         collateral = next((c for c in SUPPORTED_COLLATERALS if c.address.lower() == collateral_asset_address.lower()), SUPPORTED_COLLATERALS[0])
         try:
             priceUsd = await self._get_asset_price(assetAddress=collateral_asset_address)
@@ -354,11 +379,91 @@ class AgentManager(Authorizer):  # Core manager
         )
         return position, transactionHash
 
-    async def _make_deployer_transaction(self, params: TxParams, maxRetryCount: int = 3) -> str:
+    async def register_ens_for_agent(self, user_address: str, agent_id: str, collateral_asset_address: str, target_ltv: float) -> str | None:
+        """Register an ENS subname under borrowbott.eth and set initial constitution on mainnet.
+
+        Returns the ENS name if successful, None otherwise.
+        """
+        import re as _re
+
+        if self.mainnetEthClient is None or self.deployerAddress is None:
+            raise KibaException('Mainnet client or deployer not configured for ENS registration')
+        normalizedAddress = chain_util.normalize_address(user_address)
+        user = await self.databaseStore.get_user_by_wallet(walletAddress=normalizedAddress)
+        if user is None:
+            raise KibaException('User not found')
+        agent = await self.databaseStore.get_agent_by_id(agentId=agent_id)
+        if agent is None or agent.userId != user.userId:
+            raise KibaException('Agent not found')
+        if agent.ensName:
+            return agent.ensName
+        collateralAssetAddress = collateral_asset_address
+        targetLtv = target_ltv
+        ensLabel = _re.sub(r'[^a-z0-9-]', '', agent.name.lower().replace(' ', '-'))
+        if len(ensLabel) < 3:
+            ensLabel = f'agent-{agent.agentIndex}'
+        ensName = self.ensClient.get_full_ens_name(ensLabel)
+        logging.info(f'Registering ENS subname: {ensName} for agent {agent.agentId}')
+        # Check if subname is already registered in NameWrapper
+        parentNode = namehash(PARENT_NAME)
+        parentData = await self.mainnetEthClient.call_function_by_name(
+            toAddress=ENS_NAME_WRAPPER_ADDRESS,
+            contractAbi=ENS_NAME_WRAPPER_ABI,
+            functionName='getData',
+            arguments={'id': int.from_bytes(parentNode, 'big')},
+        )
+        parentExpiry = parentData[2]
+        subnameNode = namehash(ensName)
+        subnameData = await self.mainnetEthClient.call_function_by_name(
+            toAddress=ENS_NAME_WRAPPER_ADDRESS,
+            contractAbi=ENS_NAME_WRAPPER_ABI,
+            functionName='getData',
+            arguments={'id': int.from_bytes(subnameNode, 'big')},
+        )
+        subnameOwner = subnameData[0]
+        if not subnameOwner or subnameOwner == '0x0000000000000000000000000000000000000000':
+            subnameTx = self.ensClient.build_register_subname_transaction(
+                label=ensLabel,
+                ownerAddress=self.deployerAddress,
+                expiry=parentExpiry,
+            )
+            await self._make_deployer_transaction(
+                params={'to': Web3.to_checksum_address(subnameTx.to), 'data': subnameTx.data},  # type: ignore[typeddict-item]
+                ethClient=self.mainnetEthClient,
+            )
+            logging.info(f'Registered ENS subname: {ensName}')
+        # Set initial constitution + status via multicall
+        collateral = next((c for c in SUPPORTED_COLLATERALS if c.address.lower() == collateralAssetAddress.lower()), None)
+        collateralSymbol = collateral.symbol if collateral else 'WETH'
+        constitution = EnsConstitution(
+            max_ltv=min(targetLtv + 0.10, 0.90),
+            min_spread=0.005,
+            pause=False,
+            allowed_collateral=collateralSymbol,
+        )
+        multicallTx = self.ensClient.build_full_constitution_multicall(
+            ensName=ensName,
+            constitution=constitution,
+            status='active',
+            lastAction='agent deployed',
+            lastCheck=datetime.now(tz=UTC).isoformat(),
+        )
+        await self._make_deployer_transaction(
+            params={'to': Web3.to_checksum_address(multicallTx.to), 'data': multicallTx.data},  # type: ignore[typeddict-item]
+            ethClient=self.mainnetEthClient,
+        )
+        logging.info(f'Set ENS constitution for {ensName}')
+        await self.databaseStore.update_agent(agentId=agent.agentId, ensName=ensName)
+        logging.info(f'Updated agent {agent.agentId} with ensName={ensName}')
+        return ensName
+
+    async def _make_deployer_transaction(self, params: TxParams, maxRetryCount: int = 3, ethClient: RestEthClient | None = None) -> str:
         if self.deployerPrivateKey is None or self.deployerAddress is None:
             raise BadRequestException('Deployer private key is not configured')
+        client = ethClient or self.ethClient
         async with self.deployerTransactionLock:
-            baseParams = await self.ethClient.fill_transaction_params(params=params, fromAddress=self.deployerAddress)
+            params['from'] = Web3.to_checksum_address(self.deployerAddress)  # type: ignore[typeddict-item]
+            baseParams = await client.fill_transaction_params(params=params, fromAddress=self.deployerAddress)
             retryCount = 0
             while True:
                 paramsToSend = dict(baseParams)
@@ -367,11 +472,11 @@ class AgentManager(Authorizer):  # Core manager
                     paramsToSend['gas'] = int(baseParams['gas'] * multiplier)
                     paramsToSend['maxFeePerGas'] = hex(int(int(baseParams['maxFeePerGas'], 16) * multiplier))  # type: ignore[arg-type]
                     paramsToSend['maxPriorityFeePerGas'] = hex(int(int(baseParams['maxPriorityFeePerGas'], 16) * multiplier))  # type: ignore[arg-type]
-                signedParams = self.ethClient.w3.eth.account.sign_transaction(transaction_dict=paramsToSend, private_key=self.deployerPrivateKey)
-                transactionHash = await self.ethClient.send_raw_transaction(transactionData=signedParams.raw_transaction.hex())
+                signedParams = client.w3.eth.account.sign_transaction(transaction_dict=paramsToSend, private_key=self.deployerPrivateKey)
+                transactionHash = await client.send_raw_transaction(transactionData=signedParams.raw_transaction.hex())
                 logging.info(f'Sending deployer transaction (retry={retryCount}): {transactionHash}')
                 try:
-                    await self.ethClient.wait_for_transaction_receipt(transactionHash=transactionHash)
+                    await client.wait_for_transaction_receipt(transactionHash=transactionHash)
                     logging.info(f'Deployer transaction confirmed: {transactionHash}')
                     return transactionHash  # noqa: TRY300
                 except BadRequestException as exception:
@@ -475,11 +580,12 @@ class AgentManager(Authorizer):  # Core manager
                     logging.info(f'Agent {agent.ensName} is PAUSED by ENS constitution. Skipping all actions.')
                     continue
                 # Fetch live on-chain values
-                onchainCollateral, onchainBorrow = await self._get_onchain_position(
+                onchainCollateral, onchainBorrow, _borrowShares = await self._get_onchain_position(
                     agentWalletAddress=agent.walletAddress,
                     morphoMarketId=position.morphoMarketId,
                 )
                 _vaultShares, onchainVaultAssets = await self._get_actual_vault_balance(agentWalletAddress=agent.walletAddress)
+                hasPositionValue = onchainCollateral > 0 or onchainBorrow > 0 or (onchainVaultAssets or 0) > 0
                 result = await self.ltvManager.check_position_ltv(
                     position=position,
                     collateralDecimals=collateralDecimals,
@@ -527,13 +633,14 @@ class AgentManager(Authorizer):  # Core manager
                             agentWalletAddress=agent.walletAddress,
                             calls=calls,
                         )
-                        await self.notificationService.send_auto_repay_success(
-                            agent=agent,
-                            user=user,
-                            repayAmount=float(result.action_amount or 0) / 1e6,
-                            oldLtv=result.current_ltv,
-                            newLtv=result.target_ltv,
-                        )
+                        if hasPositionValue:
+                            await self.notificationService.send_auto_repay_success(
+                                agent=agent,
+                                user=user,
+                                repayAmount=float(result.action_amount or 0) / 1e6,
+                                oldLtv=result.current_ltv,
+                                newLtv=result.target_ltv,
+                            )
                     except Exception:  # noqa: BLE001
                         logging.exception(f'Failed to auto-repay for position {position.agentPositionId}')
                 elif result.needs_action and result.action_type == 'auto_optimize':
@@ -560,26 +667,28 @@ class AgentManager(Authorizer):  # Core manager
                                 priceContext = priceAnalysis.to_summary()
                             except Exception:  # noqa: BLE001
                                 pass
-                        await self.notificationService.send_auto_optimize_success(
-                            agent=agent,
-                            user=user,
-                            borrowAmount=float(result.action_amount or 0) / 1e6,
-                            oldLtv=result.current_ltv,
-                            newLtv=result.target_ltv,
-                            priceContext=priceContext,
-                        )
+                        if hasPositionValue:
+                            await self.notificationService.send_auto_optimize_success(
+                                agent=agent,
+                                user=user,
+                                borrowAmount=float(result.action_amount or 0) / 1e6,
+                                oldLtv=result.current_ltv,
+                                newLtv=result.target_ltv,
+                                priceContext=priceContext,
+                            )
                         # Cross-chain yield deployment removed — all yield stays on Base
                     except Exception:  # noqa: BLE001
                         logging.exception(f'Failed to auto-optimize for position {position.agentPositionId}')
                 elif result.needs_action and result.action_type == 'manual_repay':
                     logging.info(f'Position {position.agentPositionId}: Vault has insufficient funds for auto-repay, warning user')
-                    await self.notificationService.send_insufficient_vault_warning(
-                        agent=agent,
-                        user=user,
-                        currentLtv=result.current_ltv,
-                        maxLtv=result.max_ltv,
-                        requiredAmount=float(result.action_amount or 0) / 1e6,
-                    )
+                    if hasPositionValue:
+                        await self.notificationService.send_insufficient_vault_warning(
+                            agent=agent,
+                            user=user,
+                            currentLtv=result.current_ltv,
+                            maxLtv=result.max_ltv,
+                            requiredAmount=float(result.action_amount or 0) / 1e6,
+                        )
                 # Deploy idle wallet assets into the position
                 usdcAddress = constants.CHAIN_USDC_MAP[self.chainId]
                 walletCollateral = await self._get_erc20_balance(tokenAddress=position.collateralAsset, walletAddress=agent.walletAddress)
@@ -662,24 +771,26 @@ class AgentManager(Authorizer):  # Core manager
                 isCritical = currentLtv >= CRITICAL_LTV_THRESHOLD * maxLtv and maxLtv > 0
                 canAgentManage = (onchainVaultAssets or 0) > 0
                 if isCritical and not canAgentManage:
-                    await self.notificationService.send_critical_ltv_warning(
+                    if hasPositionValue:
+                        await self.notificationService.send_critical_ltv_warning(
+                            agent=agent,
+                            user=user,
+                            currentLtv=currentLtv,
+                            maxLtv=maxLtv,
+                        )
+                # Status notification - send every check cycle (every 5 minutes)
+                # No throttling for demo purposes
+                if hasPositionValue:
+                    priceData = await self.alchemyClient.get_asset_current_price(chainId=self.chainId, assetAddress=position.collateralAsset)
+                    collateralValue = (onchainCollateral / (10**collateralDecimals)) * priceData.priceUsd
+                    debtValue = onchainBorrow / 1e6
+                    await self.notificationService.send_daily_digest(
                         agent=agent,
                         user=user,
                         currentLtv=currentLtv,
-                        maxLtv=maxLtv,
+                        collateralValue=collateralValue,
+                        debtValue=debtValue,
                     )
-                # Status notification - send every check cycle (every 5 minutes)
-                # No throttling for demo purposes
-                priceData = await self.alchemyClient.get_asset_current_price(chainId=self.chainId, assetAddress=position.collateralAsset)
-                collateralValue = (onchainCollateral / (10**collateralDecimals)) * priceData.priceUsd
-                debtValue = onchainBorrow / 1e6
-                await self.notificationService.send_daily_digest(
-                    agent=agent,
-                    user=user,
-                    currentLtv=currentLtv,
-                    collateralValue=collateralValue,
-                    debtValue=debtValue,
-                )
                 # ENS status writes are on mainnet — too expensive for every check cycle.
                 # Status is written via scripts/set_ens_constitution.py when needed.
             except Exception:  # noqa: BLE001
@@ -780,7 +891,7 @@ class AgentManager(Authorizer):  # Core manager
         logging.info(f'Created position for {normalized_address}: {position.position_id}, agent: {agent.name}')
         return position, agentResource
 
-    async def get_position(self, user_address: str) -> Position | None:
+    async def get_position(self, user_address: str, agent_id: str | None = None) -> Position | None:
         """Get position with all values fetched from on-chain (collateral, borrow, vault balance)."""
         normalized_address = chain_util.normalize_address(user_address)
         user = await self.databaseStore.get_user_by_wallet(walletAddress=normalized_address)
@@ -789,14 +900,19 @@ class AgentManager(Authorizer):  # Core manager
         agents = await self.databaseStore.get_agents_by_user(userId=user.userId)
         if not agents:
             return None
-        agent = agents[0]
+        if agent_id:
+            agent = next((a for a in agents if a.agentId == agent_id), None)
+            if agent is None:
+                return None
+        else:
+            agent = agents[0]
         dbPosition = await self.databaseStore.get_position_by_agent(agentId=agent.agentId)
         if dbPosition is None:
             return None
         collateral = next((c for c in SUPPORTED_COLLATERALS if c.address.lower() == dbPosition.collateralAsset.lower()), SUPPORTED_COLLATERALS[0])
         # Fetch all on-chain data: collateral amount, borrow amount, vault balance, price
         try:
-            onchainCollateral, onchainBorrow = await self._get_onchain_position(
+            onchainCollateral, onchainBorrow, _borrowShares = await self._get_onchain_position(
                 agentWalletAddress=agent.walletAddress,
                 morphoMarketId=dbPosition.morphoMarketId,
             )
@@ -877,9 +993,26 @@ class AgentManager(Authorizer):  # Core manager
         assets = int(assetsResponse[0])
         return shares, assets
 
-    async def _get_onchain_position(self, agentWalletAddress: str, morphoMarketId: str) -> tuple[int, int]:
+    async def _resolve_agent(self, user_address: str, agent_id: str | None = None):
+        """Look up user + agent. If agent_id is given, find that specific agent; otherwise fall back to agents[0]."""
+        normalized = chain_util.normalize_address(user_address)
+        user = await self.databaseStore.get_user_by_wallet(walletAddress=normalized)
+        if user is None:
+            raise NotFoundException(message='User not found')
+        agents = await self.databaseStore.get_agents_by_user(userId=user.userId)
+        if not agents:
+            raise NotFoundException(message='No agents found')
+        if agent_id:
+            agent = next((a for a in agents if a.agentId == agent_id), None)
+            if agent is None:
+                raise NotFoundException(message=f'Agent {agent_id} not found')
+        else:
+            agent = agents[0]
+        return user, agent
+
+    async def _get_onchain_position(self, agentWalletAddress: str, morphoMarketId: str) -> tuple[int, int, int]:
         """Get live collateral and borrow amounts from Morpho Blue contract.
-        Returns: (collateral_amount_raw, borrow_amount_raw_usdc)
+        Returns: (collateral_amount_raw, borrow_amount_raw_usdc, borrow_shares)
         """
         from money_hack.morpho.transaction_builder import MORPHO_BLUE_ADDRESS
 
@@ -894,7 +1027,7 @@ class AgentManager(Authorizer):  # Core manager
         collateralAmount = int(positionResponse[2])
         borrowShares = int(positionResponse[1])
         if borrowShares == 0:
-            return collateralAmount, 0
+            return collateralAmount, 0, 0
         # Fetch market state to convert borrowShares -> borrowAssets
         marketResponse = await self.ethClient.call_function_by_name(
             toAddress=MORPHO_BLUE_ADDRESS,
@@ -905,10 +1038,10 @@ class AgentManager(Authorizer):  # Core manager
         totalBorrowAssets = int(marketResponse[2])
         totalBorrowShares = int(marketResponse[3])
         if totalBorrowShares == 0:
-            return collateralAmount, 0
+            return collateralAmount, 0, 0
         # borrowAssets = borrowShares * totalBorrowAssets / totalBorrowShares (round up for debt)
         borrowAmount = (borrowShares * totalBorrowAssets + totalBorrowShares - 1) // totalBorrowShares
-        return collateralAmount, borrowAmount
+        return collateralAmount, borrowAmount, borrowShares
 
     async def _get_erc20_balance(self, tokenAddress: str, walletAddress: str) -> int:
         """Get ERC20 token balance for a wallet address."""
@@ -944,19 +1077,12 @@ class AgentManager(Authorizer):  # Core manager
             raise ValueError('Failed to get Yo.xyz yield APY')
         return collateralMarkets, yieldApy, YO_VAULT_ADDRESS, YO_VAULT_NAME
 
-    async def _calc_withdraw_preview(self, userAddress: str, withdrawAmountRaw: int) -> WithdrawPreview:
-        normalizedAddress = chain_util.normalize_address(userAddress)
-        user = await self.databaseStore.get_user_by_wallet(walletAddress=normalizedAddress)
-        if user is None:
-            raise NotFoundException(message='User not found')
-        agents = await self.databaseStore.get_agents_by_user(userId=user.userId)
-        if not agents:
-            raise NotFoundException(message='No agent found')
-        agent = agents[0]
+    async def _calc_withdraw_preview(self, userAddress: str, withdrawAmountRaw: int, agent_id: str | None = None) -> WithdrawPreview:
+        _user, agent = await self._resolve_agent(userAddress, agent_id)
         dbPosition = await self.databaseStore.get_position_by_agent(agentId=agent.agentId)
         if dbPosition is None:
             raise NotFoundException(message='No active position found')
-        onchainCollateral, onchainBorrow = await self._get_onchain_position(
+        onchainCollateral, onchainBorrow, _borrowShares = await self._get_onchain_position(
             agentWalletAddress=agent.walletAddress,
             morphoMarketId=dbPosition.morphoMarketId,
         )
@@ -1003,20 +1129,13 @@ class AgentManager(Authorizer):  # Core manager
             warning_message=warningMessage,
         )
 
-    async def get_withdraw_preview(self, user_address: str, amount: str) -> WithdrawPreview:
+    async def get_withdraw_preview(self, user_address: str, amount: str, agent_id: str | None = None) -> WithdrawPreview:
         withdrawAmountRaw = int(amount)
-        return await self._calc_withdraw_preview(userAddress=user_address, withdrawAmountRaw=withdrawAmountRaw)
+        return await self._calc_withdraw_preview(userAddress=user_address, withdrawAmountRaw=withdrawAmountRaw, agent_id=agent_id)
 
-    async def execute_withdraw(self, user_address: str, amount: str) -> WithdrawTransactionsData:
+    async def execute_withdraw(self, user_address: str, amount: str, agent_id: str | None = None) -> WithdrawTransactionsData:
         """Execute a partial withdrawal from vault via the agent's smart wallet."""
-        normalizedAddress = chain_util.normalize_address(user_address)
-        user = await self.databaseStore.get_user_by_wallet(walletAddress=normalizedAddress)
-        if user is None:
-            raise NotFoundException(message='User not found')
-        agents = await self.databaseStore.get_agents_by_user(userId=user.userId)
-        if not agents:
-            raise NotFoundException(message='No agents found')
-        agent = agents[0]
+        _user, agent = await self._resolve_agent(user_address, agent_id)
         dbPosition = await self.databaseStore.get_position_by_agent(agentId=agent.agentId)
         if dbPosition is None:
             raise NotFoundException(message='No active position found')
@@ -1054,183 +1173,10 @@ class AgentManager(Authorizer):  # Core manager
             )
         return WithdrawTransactionsData(transactions=transactions, withdraw_amount=str(withdrawAmount), vault_address=YO_VAULT_ADDRESS)
 
-    async def execute_cross_chain_withdraw(
-        self,
-        user_address: str,
-        amount: str,
-        to_chain: int,
-        to_token: str,
-        to_address: str,
-    ) -> CrossChainActionResource:
-        """Execute a cross-chain withdrawal: withdraw USDC from vault on Base, bridge to destination chain via LI.FI.
-
-        The agent executes both the vault withdrawal and the LI.FI bridge transaction on Base using the paymaster.
-        """
-        if not self.crossChainManager:
-            raise BadRequestException('Cross-chain manager is not configured')
-        normalizedAddress = chain_util.normalize_address(user_address)
-        user = await self.databaseStore.get_user_by_wallet(walletAddress=normalizedAddress)
-        if user is None:
-            raise NotFoundException(message='User not found')
-        agents = await self.databaseStore.get_agents_by_user(userId=user.userId)
-        if not agents:
-            raise NotFoundException(message='No agents found')
-        agent = agents[0]
-        dbPosition = await self.databaseStore.get_position_by_agent(agentId=agent.agentId)
-        if dbPosition is None:
-            raise NotFoundException(message='No active position found')
-        withdrawAmount = int(amount)
-        # Check vault balance
-        _actualVaultShares, actualAssets = await self._get_actual_vault_balance(agentWalletAddress=agent.walletAddress)
-        if withdrawAmount > actualAssets:
-            raise BadRequestException(message=f'Requested withdrawal ${withdrawAmount / 1e6:.2f} exceeds actual vault balance ${actualAssets / 1e6:.2f}')
-        # Check LTV safety
-        preview = await self._calc_withdraw_preview(userAddress=user_address, withdrawAmountRaw=withdrawAmount)
-        if preview.is_blocked:
-            raise BadRequestException(message=preview.warning_message or 'Withdrawal amount is too large for safe LTV')
-        # Step 1: Prepare the LI.FI quote
-        prepareResult = await self.crossChainManager.prepare_cross_chain_withdrawal(
-            agentId=agent.agentId,
-            agentWalletAddress=agent.walletAddress,
-            usdcAmount=withdrawAmount,
-            toChain=to_chain,
-            toToken=to_token,
-            toAddress=to_address,
-        )
-        if not prepareResult.success or prepareResult.action_id is None:
-            raise BadRequestException(message=f'Failed to prepare cross-chain withdrawal: {prepareResult.reason}')
-        # Step 2: Withdraw USDC from vault on Base
-        sharesToRedeemResponse = await self.ethClient.call_function_by_name(
-            toAddress=YO_VAULT_ADDRESS,
-            contractAbi=morpho_abis.ERC4626_VAULT_ABI,
-            functionName='convertToShares',
-            arguments={'assets': withdrawAmount},
-        )
-        sharesToRedeem = int(sharesToRedeemResponse[0])
-        usdcAddress = constants.CHAIN_USDC_MAP.get(self.chainId)
-        if usdcAddress is None:
-            raise ValueError(f'USDC not supported on chain {self.chainId}')
-        transactionBuilder = TransactionBuilder(chainId=self.chainId, usdcAddress=usdcAddress, yoVaultAddress=YO_VAULT_ADDRESS)
-        withdrawTxs = transactionBuilder.build_withdraw_transactions(user_address=agent.walletAddress, withdraw_shares=sharesToRedeem)
-        withdrawCalls = [EncodedCall(toAddress=tx.to, data=tx.data if tx.data.startswith('0x') else f'0x{tx.data}', value=int(tx.value or '0')) for tx in withdrawTxs]
-        await self._send_user_operation(agentWalletAddress=agent.walletAddress, calls=withdrawCalls)
-        logging.info(f'Withdrew {withdrawAmount} USDC from vault for cross-chain withdrawal')
-        # Step 3: Approve USDC to LI.FI router + execute bridge tx on Base
-        action = (await self.databaseStore.get_pending_cross_chain_actions(agentId=agent.agentId))[0]
-        approvalAddress = str(action.details.get('approval_address', ''))
-        txTo = str(action.details.get('tx_to', ''))
-        txData = str(action.details.get('tx_data', ''))
-        txValue = str(action.details.get('tx_value', '0x0'))
-        # Build approve + bridge calls
-        from web3 import Web3
-        erc20Abi = [{'inputs': [{'name': 'spender', 'type': 'address'}, {'name': 'amount', 'type': 'uint256'}], 'name': 'approve', 'outputs': [{'name': '', 'type': 'bool'}], 'stateMutability': 'nonpayable', 'type': 'function'}]
-        approveData = Web3().eth.contract(abi=erc20Abi).encode_abi('approve', args=[Web3.to_checksum_address(approvalAddress), withdrawAmount])
-        bridgeCalls: list[EncodedCall] = [
-            EncodedCall(toAddress=usdcAddress, data=approveData, value=0),
-            EncodedCall(toAddress=txTo, data=txData, value=int(txValue, 16) if txValue.startswith('0x') else int(txValue)),
-        ]
-        txHash = await self._send_user_operation(agentWalletAddress=agent.walletAddress, calls=bridgeCalls)
-        logging.info(f'Executed cross-chain bridge tx for withdrawal: {txHash}')
-        # Step 4: Update DB with txHash
-        updatedAction = await self.databaseStore.update_cross_chain_action(
-            crossChainActionId=prepareResult.action_id,
-            txHash=txHash,
-            status='in_flight',
-        )
-        await self.databaseStore.log_agent_action(
-            agentId=agent.agentId,
-            actionType='cross_chain_withdraw',
-            value=f'${withdrawAmount / 1e6:.2f}',
-            valueId=str(prepareResult.action_id),
-            details={
-                'amount': str(withdrawAmount),
-                'to_chain': to_chain,
-                'to_address': to_address,
-                'tx_hash': txHash,
-                'bridge': updatedAction.bridgeName,
-            },
-        )
-        if self.notificationService:
-            await self.notificationService.send_cross_chain_withdraw_initiated(
-                agent=agent,
-                user=user,
-                amount=withdrawAmount / 1e6,
-                toChain=to_chain,
-                actionId=prepareResult.action_id,
-            )
-        return CrossChainActionResource(
-            action_id=updatedAction.crossChainActionId,
-            created_date=updatedAction.createdDate,
-            action_type=updatedAction.actionType,
-            from_chain=updatedAction.fromChain,
-            to_chain=updatedAction.toChain,
-            from_token=updatedAction.fromToken,
-            to_token=updatedAction.toToken,
-            amount=updatedAction.amount,
-            tx_hash=updatedAction.txHash,
-            bridge_name=updatedAction.bridgeName,
-            status=updatedAction.status,
-            details=typing.cast('dict[str, object]', updatedAction.details),
-        )
-
-    async def record_cross_chain_deposit(
-        self,
-        user_address: str,
-        from_chain: int,
-        from_token: str,
-        to_token: str,
-        amount: str,
-        tx_hash: str | None = None,
-        bridge_name: str | None = None,
-    ) -> CrossChainActionResource:
-        """Record a user-initiated cross-chain deposit from the LI.FI Widget."""
-        if not self.crossChainManager:
-            raise BadRequestException('Cross-chain manager is not configured')
-        normalizedAddress = chain_util.normalize_address(user_address)
-        user = await self.databaseStore.get_user_by_wallet(walletAddress=normalizedAddress)
-        if user is None:
-            raise NotFoundException(message='User not found')
-        agents = await self.databaseStore.get_agents_by_user(userId=user.userId)
-        if not agents:
-            raise NotFoundException(message='No agents found')
-        agent = agents[0]
-        result = await self.crossChainManager.record_cross_chain_deposit(
-            agentId=agent.agentId,
-            fromChain=from_chain,
-            fromToken=from_token,
-            toToken=to_token,
-            amount=amount,
-            txHash=tx_hash,
-            bridgeName=bridge_name,
-        )
-        if not result.success or result.action_id is None:
-            raise BadRequestException(message=f'Failed to record deposit: {result.reason}')
-        action = (await self.databaseStore.get_cross_chain_actions(agentId=agent.agentId, limit=1))[0]
-        return CrossChainActionResource(
-            action_id=action.crossChainActionId,
-            created_date=action.createdDate,
-            action_type=action.actionType,
-            from_chain=action.fromChain,
-            to_chain=action.toChain,
-            from_token=action.fromToken,
-            to_token=action.toToken,
-            amount=action.amount,
-            tx_hash=action.txHash,
-            bridge_name=action.bridgeName,
-            status=action.status,
-            details=typing.cast('dict[str, object]', action.details),
-        )
-
-    async def get_close_position_transactions(self, user_address: str) -> ClosePositionTransactionsData:
+    async def get_close_position_transactions(self, user_address: str, agent_id: str | None = None) -> ClosePositionTransactionsData:
         """Build transactions to fully close a position: withdraw from vault, repay debt, withdraw collateral."""
-        normalizedAddress = chain_util.normalize_address(user_address)
-        user = await self.databaseStore.get_user_by_wallet(walletAddress=normalizedAddress)
-        if user is None:
-            raise NotFoundException(message='User not found')
-        agents = await self.databaseStore.get_agents_by_user(userId=user.userId)
-        if not agents:
-            raise NotFoundException(message='No agents found')
-        agent = agents[0]
+        _user, agent = await self._resolve_agent(user_address, agent_id)
+        agentWalletAddress = chain_util.normalize_address(agent.walletAddress)
         dbPosition = await self.databaseStore.get_position_by_agent(agentId=agent.agentId)
         if dbPosition is None:
             raise NotFoundException(message='No active position found')
@@ -1240,33 +1186,97 @@ class AgentManager(Authorizer):  # Core manager
         usdcAddress = constants.CHAIN_USDC_MAP.get(self.chainId)
         if usdcAddress is None:
             raise ValueError(f'USDC not supported on chain {self.chainId}')
-        onchainCollateral, onchainBorrow = await self._get_onchain_position(
+        onchainCollateral, onchainBorrow, borrowShares = await self._get_onchain_position(
             agentWalletAddress=agent.walletAddress,
             morphoMarketId=dbPosition.morphoMarketId,
         )
-        actualVaultShares, _actualVaultAssets = await self._get_actual_vault_balance(agentWalletAddress=agent.walletAddress)
-        vaultWithdrawAmount = actualVaultShares
+        actualVaultShares, actualVaultAssets = await self._get_actual_vault_balance(agentWalletAddress=agent.walletAddress)
         repayAmount = onchainBorrow
         collateralAmount = onchainCollateral
+        if actualVaultAssets < repayAmount:
+            raise BadRequestException(message=f'Insufficient USDC in vault to close position. needed_raw={repayAmount} available_raw={actualVaultAssets}')
         transactionBuilder = TransactionBuilder(chainId=self.chainId, usdcAddress=usdcAddress, yoVaultAddress=YO_VAULT_ADDRESS)
         transactions = transactionBuilder.build_close_position_transactions_from_market(
-            user_address=normalizedAddress,
+            user_address=agentWalletAddress,
             collateral_address=dbPosition.collateralAsset,
             collateral_amount=collateralAmount,
             repay_amount=repayAmount,
-            vault_withdraw_amount=vaultWithdrawAmount,
+            vault_withdraw_amount=actualVaultAssets,
             market=market,
             needs_usdc_approval=True,
+            vault_shares=actualVaultShares,
+            borrow_shares=borrowShares,
         )
-        logging.info(f'Built close position transactions for {normalizedAddress}: vault_withdraw={vaultWithdrawAmount}, repay={repayAmount}, collateral={collateralAmount}')
+        logging.info(f'Built close position transactions for {agentWalletAddress}: vault_shares={actualVaultShares}, vault_assets={actualVaultAssets}, repay={repayAmount}, borrow_shares={borrowShares}, collateral={collateralAmount}')
         return ClosePositionTransactionsData(
             transactions=transactions,
             collateral_amount=str(collateralAmount),
             repay_amount=str(repayAmount),
-            vault_withdraw_amount=str(vaultWithdrawAmount),
+            vault_withdraw_amount=str(actualVaultAssets),
             morpho_address=transactionBuilder.morphoAddress,
             vault_address=YO_VAULT_ADDRESS,
         )
+
+    async def execute_close_position(self, user_address: str, agent_id: str | None = None) -> ClosePositionTransactionsData:
+        """Build and execute transactions to fully close a position via the agent's smart wallet."""
+        _user, agent = await self._resolve_agent(user_address, agent_id)
+        agentWalletAddress = chain_util.normalize_address(agent.walletAddress)
+        normalizedUserAddress = chain_util.normalize_address(user_address)
+        dbPosition = await self.databaseStore.get_position_by_agent(agentId=agent.agentId)
+        if dbPosition is None:
+            raise NotFoundException(message='No active position found')
+        market = await self.morphoClient.get_market(chain_id=self.chainId, collateral_address=dbPosition.collateralAsset)
+        if market is None:
+            raise ValueError(f'No Morpho market found for collateral {dbPosition.collateralAsset}')
+        usdcAddress = constants.CHAIN_USDC_MAP.get(self.chainId)
+        if usdcAddress is None:
+            raise ValueError(f'USDC not supported on chain {self.chainId}')
+        transactionBuilder = TransactionBuilder(chainId=self.chainId, usdcAddress=usdcAddress, yoVaultAddress=YO_VAULT_ADDRESS)
+        lastTransactionHash: str | None = None
+        actualVaultShares, actualVaultAssets = await self._get_actual_vault_balance(agentWalletAddress=agent.walletAddress)
+        if actualVaultShares > 0:
+            redeemTransactions = transactionBuilder.build_withdraw_transactions(user_address=agentWalletAddress, withdraw_shares=actualVaultShares)
+            redeemCalls = [EncodedCall(toAddress=tx.to, data=tx.data if tx.data.startswith('0x') else f'0x{tx.data}', value=int(tx.value or '0')) for tx in redeemTransactions]
+            lastTransactionHash = await self._send_user_operation(agentWalletAddress=agent.walletAddress, calls=redeemCalls)
+            logging.info(f'Redeemed vault shares for {agentWalletAddress}: shares={actualVaultShares}, assets={actualVaultAssets}, tx={lastTransactionHash}')
+        actualVaultShares, actualVaultAssets = await self._get_actual_vault_balance(agentWalletAddress=agent.walletAddress)
+        onchainCollateral, _onchainBorrow, borrowShares = await self._get_onchain_position(agentWalletAddress=agent.walletAddress, morphoMarketId=dbPosition.morphoMarketId)
+        marketIdBytes = bytes.fromhex(dbPosition.morphoMarketId[2:]) if dbPosition.morphoMarketId.startswith('0x') else bytes.fromhex(dbPosition.morphoMarketId)
+        marketResponse = await self.ethClient.call_function_by_name(
+            toAddress=MORPHO_BLUE_ADDRESS,
+            contractAbi=morpho_abis.MORPHO_BLUE_ABI,
+            functionName='market',
+            arguments={'id': marketIdBytes},
+        )
+        totalBorrowAssets = int(marketResponse[2])
+        totalBorrowShares = int(marketResponse[3])
+        onchainBorrow = (borrowShares * totalBorrowAssets + totalBorrowShares - 1) // totalBorrowShares if totalBorrowShares > 0 else 0
+        walletUsdcBalance = await self._get_erc20_balance(tokenAddress=usdcAddress, walletAddress=agent.walletAddress)
+        if walletUsdcBalance < onchainBorrow:
+            raise BadRequestException(message=f'Insufficient USDC in wallet after redeem. needed_raw={onchainBorrow} available_raw={walletUsdcBalance}')
+        repayTransactions = transactionBuilder.build_repay_and_withdraw_collateral_transactions_from_market(user_address=agentWalletAddress, collateral_address=dbPosition.collateralAsset, collateral_amount=onchainCollateral, repay_amount=onchainBorrow, market=market, needs_usdc_approval=True, borrow_shares=borrowShares)
+        repayCalls = [EncodedCall(toAddress=tx.to, data=tx.data if tx.data.startswith('0x') else f'0x{tx.data}', value=int(tx.value or '0')) for tx in repayTransactions]
+        lastTransactionHash = await self._send_user_operation(agentWalletAddress=agent.walletAddress, calls=repayCalls)
+        logging.info(f'Repaid and withdrew collateral for {agentWalletAddress}: repay={onchainBorrow}, borrow_shares={borrowShares}, collateral={onchainCollateral}, tx={lastTransactionHash}')
+        walletUsdcBalance = await self._get_erc20_balance(tokenAddress=usdcAddress, walletAddress=agent.walletAddress)
+        walletCollateralBalance = await self._get_erc20_balance(tokenAddress=dbPosition.collateralAsset, walletAddress=agent.walletAddress)
+        transferTransactions: list[TransactionCall] = []
+        if walletUsdcBalance > 0:
+            transferTransactions.append(TransactionCall(to=usdcAddress, data=encode_transfer(recipient=normalizedUserAddress, amount=walletUsdcBalance)))
+        if walletCollateralBalance > 0:
+            transferTransactions.append(TransactionCall(to=dbPosition.collateralAsset, data=encode_transfer(recipient=normalizedUserAddress, amount=walletCollateralBalance)))
+        if transferTransactions:
+            transferCalls = [EncodedCall(toAddress=tx.to, data=tx.data if tx.data.startswith('0x') else f'0x{tx.data}', value=int(tx.value or '0')) for tx in transferTransactions]
+            try:
+                lastTransactionHash = await self._send_user_operation(agentWalletAddress=agent.walletAddress, calls=transferCalls)
+            except BadRequestException as error:
+                if error.message and 'replacement underpriced' in error.message:
+                    await asyncio.sleep(3)
+                    lastTransactionHash = await self._send_user_operation(agentWalletAddress=agent.walletAddress, calls=transferCalls)
+                else:
+                    raise
+            logging.info(f'Transferred remaining assets to user {normalizedUserAddress}: usdc={walletUsdcBalance}, collateral={walletCollateralBalance}, tx={lastTransactionHash}')
+        return ClosePositionTransactionsData(transactions=[], collateral_amount=str(onchainCollateral), repay_amount=str(onchainBorrow), vault_withdraw_amount=str(actualVaultAssets), morpho_address=transactionBuilder.morphoAddress, vault_address=YO_VAULT_ADDRESS, transaction_hash=lastTransactionHash)
 
     async def get_wallet(self, wallet_address: str) -> Wallet:
         walletAddress = chain_util.normalize_address(wallet_address)
@@ -1461,6 +1471,32 @@ class AgentManager(Authorizer):  # Core manager
         self._userConfigsCache[normalizedAddress] = updatedConfig
         return updatedConfig
 
+    def normalize_agent_name(self, name: str) -> str:
+        """Normalize a display name into a valid ENS label."""
+        import re as _re
+
+        label = name.lower().strip().replace(' ', '-')
+        label = _re.sub(r'[^a-z0-9-]', '', label)
+        label = _re.sub(r'-+', '-', label)
+        label = label.strip('-')
+        if len(label) < 3:
+            label = f'agent-{label}' if label else 'agent'
+        if len(label) > 32:
+            label = label[:32].rstrip('-')
+        return label
+
+    def preview_agent_name(self, name: str) -> tuple[str, str, bool, str | None]:
+        """Preview what ENS name an agent name would produce.
+        Returns (label, full_ens_name, is_available, error_or_none).
+        """
+        label = self.normalize_agent_name(name)
+        isValid, errorMsg = self.ensClient.validate_label(label)
+        if not isValid:
+            return label, self.ensClient.get_full_ens_name(label), False, errorMsg
+        isAvailable = self.ensClient.check_name_available(label)
+        fullName = self.ensClient.get_full_ens_name(label)
+        return label, fullName, isAvailable, None if isAvailable else 'Name is already taken'
+
     def check_ens_name_available(self, label: str) -> tuple[bool, str, str | None]:
         """Check if an ENS subdomain label is available."""
         isValid, errorMsg = self.ensClient.validate_label(label)
@@ -1474,16 +1510,11 @@ class AgentManager(Authorizer):  # Core manager
         """Reserve an ENS name and return the full ENS name."""
         return self.ensClient.reserve_name(label)
 
-    async def get_ens_config_transactions(self, userAddress: str, collateral: str | None, targetLtv: int | None, maxLtv: int | None, minLtv: int | None, autoRebalance: bool, riskTolerance: str, description: str | None) -> tuple[list[TransactionCall], str]:
+    async def get_ens_config_transactions(
+        self, userAddress: str, collateral: str | None, targetLtv: int | None, maxLtv: int | None, minLtv: int | None, autoRebalance: bool, riskTolerance: str, description: str | None, agent_id: str | None = None
+    ) -> tuple[list[TransactionCall], str]:
         """Get transactions to set ENS text records for agent configuration."""
-        normalizedAddress = chain_util.normalize_address(userAddress)
-        user = await self.databaseStore.get_user_by_wallet(walletAddress=normalizedAddress)
-        if user is None:
-            raise NotFoundException(message='User not found')
-        agents = await self.databaseStore.get_agents_by_user(userId=user.userId)
-        if not agents:
-            raise NotFoundException(message='No agents found for user')
-        agent = agents[0]
+        _user, agent = await self._resolve_agent(userAddress, agent_id)
         if not agent.ensName:
             raise ValueError('Agent does not have an ENS name')
         config = EnsAgentConfig(
@@ -1499,16 +1530,9 @@ class AgentManager(Authorizer):  # Core manager
         transactions = self.ensClient.build_set_agent_config_transactions(agent.ensName, config)
         return transactions, agent.ensName
 
-    async def get_ens_constitution(self, userAddress: str) -> dict[str, object]:
+    async def get_ens_constitution(self, userAddress: str, agent_id: str | None = None) -> dict[str, object]:
         """Read the full ENS constitution + status for an agent."""
-        normalizedAddress = chain_util.normalize_address(userAddress)
-        user = await self.databaseStore.get_user_by_wallet(walletAddress=normalizedAddress)
-        if user is None:
-            raise NotFoundException(message='User not found')
-        agents = await self.databaseStore.get_agents_by_user(userId=user.userId)
-        if not agents:
-            raise NotFoundException(message='No agents found for user')
-        agent = agents[0]
+        _user, agent = await self._resolve_agent(userAddress, agent_id)
         if not agent.ensName:
             return {'ens_name': None, 'max_ltv': None, 'min_spread': None, 'max_position_usd': None, 'allowed_collateral': None, 'pause': False, 'status': None, 'last_action': None, 'last_check': None}
         if not self.mainnetEthClient:
@@ -1527,16 +1551,9 @@ class AgentManager(Authorizer):  # Core manager
             'last_check': status.last_check,
         }
 
-    async def set_ens_constitution(self, userAddress: str, maxLtv: float | None, minSpread: float | None, maxPositionUsd: float | None, allowedCollateral: str | None, pause: bool) -> dict[str, object]:
+    async def set_ens_constitution(self, userAddress: str, maxLtv: float | None, minSpread: float | None, maxPositionUsd: float | None, allowedCollateral: str | None, pause: bool, agent_id: str | None = None) -> dict[str, object]:
         """Set the ENS constitution for an agent via mainnet deployer multicall."""
-        normalizedAddress = chain_util.normalize_address(userAddress)
-        user = await self.databaseStore.get_user_by_wallet(walletAddress=normalizedAddress)
-        if user is None:
-            raise NotFoundException(message='User not found')
-        agents = await self.databaseStore.get_agents_by_user(userId=user.userId)
-        if not agents:
-            raise NotFoundException(message='No agents found for user')
-        agent = agents[0]
+        _user, agent = await self._resolve_agent(userAddress, agent_id)
         if not agent.ensName:
             raise BadRequestException(message='Agent does not have an ENS name')
         if not self.mainnetEthClient or not self.deployerPrivateKey:
@@ -1681,34 +1698,140 @@ class AgentManager(Authorizer):  # Core manager
             for thought in thoughts
         ]
 
-    async def get_cross_chain_actions(
-        self,
-        user_address: str,
-        limit: int = 20,
-    ) -> list[CrossChainActionResource]:
-        normalizedAddress = chain_util.normalize_address(user_address)
-        user = await self.databaseStore.get_user_by_wallet(walletAddress=normalizedAddress)
-        if user is None:
-            return []
-        agents = await self.databaseStore.get_agents_by_user(userId=user.userId)
-        if not agents:
-            return []
-        agent = agents[0]
-        actions = await self.databaseStore.get_cross_chain_actions(agentId=agent.agentId, limit=limit)
-        return [
-            CrossChainActionResource(
-                action_id=action.crossChainActionId,
-                created_date=action.createdDate,
-                action_type=action.actionType,
-                from_chain=action.fromChain,
-                to_chain=action.toChain,
-                from_token=action.fromToken,
-                to_token=action.toToken,
-                amount=action.amount,
-                tx_hash=action.txHash,
-                bridge_name=action.bridgeName,
-                status=action.status,
-                details=typing.cast('dict[str, object]', action.details),
+    async def get_agent_position(self, agent_id: str) -> Position | None:
+        """Get position for a specific agent."""
+        agent = await self.databaseStore.get_agent(agentId=agent_id)
+        if agent is None:
+            raise NotFoundException(message='Agent not found')
+        dbPosition = await self.databaseStore.get_position_by_agent(agentId=agent.agentId)
+        if dbPosition is None:
+            return None
+        collateral = next((c for c in SUPPORTED_COLLATERALS if c.address.lower() == dbPosition.collateralAsset.lower()), SUPPORTED_COLLATERALS[0])
+        onchainCollateral, onchainBorrow, _borrowShares = await self._get_onchain_position(
+            agentWalletAddress=agent.walletAddress,
+            morphoMarketId=dbPosition.morphoMarketId,
+        )
+        _actualVaultShares, actualVaultAssets = await self._get_actual_vault_balance(agentWalletAddress=agent.walletAddress)
+        walletCollateralBalance = await self._get_erc20_balance(tokenAddress=dbPosition.collateralAsset, walletAddress=agent.walletAddress)
+        usdcAddress = constants.CHAIN_USDC_MAP.get(self.chainId)
+        if usdcAddress is None:
+            raise ValueError(f'USDC not supported on chain {self.chainId}')
+        walletUsdcBalance = await self._get_erc20_balance(tokenAddress=usdcAddress, walletAddress=agent.walletAddress)
+        try:
+            collateralPriceUsd = await self._get_asset_price(assetAddress=dbPosition.collateralAsset)
+            collateralValueUsd = onchainCollateral * collateralPriceUsd / (10 ** collateral.decimals)
+            walletCollateralValueUsd = walletCollateralBalance * collateralPriceUsd / (10 ** collateral.decimals)
+        except Exception as e:  # noqa: BLE001
+            logging.error(f'Failed to get price for {dbPosition.collateralAsset}: {e!r}', exc_info=True)
+            collateralValueUsd = 0.0
+            walletCollateralValueUsd = 0.0
+        borrowValueUsd = onchainBorrow / 1e6
+        walletUsdcValueUsd = walletUsdcBalance / 1e6
+        currentLtv = borrowValueUsd / collateralValueUsd if collateralValueUsd > 0 else 0
+        market = await self.morphoClient.get_market(chain_id=self.chainId, collateral_address=dbPosition.collateralAsset)
+        maxLtv = market.lltv if market else 0.86
+        estimatedApy = 0.08
+        try:
+            yieldApy = await self.fortyAcresClient.get_yield_apy(chainId=self.chainId)
+            if yieldApy is not None:
+                estimatedApy = yieldApy
+        except Exception:  # noqa: BLE001
+            logging.debug('Failed to get yield APY, using default')
+        position = Position(
+            position_id=f'pos-{agent.agentId[:8]}',
+            created_date=dbPosition.createdDate,
+            user_address=agent.walletAddress,
+            collateral_asset=collateral,
+            collateral_amount=str(onchainCollateral),
+            collateral_value_usd=collateralValueUsd,
+            borrow_amount=str(onchainBorrow),
+            borrow_value_usd=borrowValueUsd,
+            current_ltv=currentLtv,
+            target_ltv=dbPosition.targetLtv,
+            health_factor=maxLtv / currentLtv if currentLtv > 0 else 999,
+            vault_balance=str(actualVaultAssets),
+            vault_balance_usd=actualVaultAssets / 1e6,
+            accrued_yield='0',
+            accrued_yield_usd=0.0,
+            estimated_apy=estimatedApy,
+            status=dbPosition.status,
+            wallet_collateral_balance=str(walletCollateralBalance),
+            wallet_collateral_balance_usd=walletCollateralValueUsd,
+            wallet_usdc_balance=str(walletUsdcBalance),
+            wallet_usdc_balance_usd=walletUsdcValueUsd,
+        )
+        return position
+
+    async def get_agent_wallet(self, agent_id: str) -> Wallet:
+        """Get wallet balance for a specific agent."""
+        agent = await self.databaseStore.get_agent(agentId=agent_id)
+        if agent is None:
+            raise NotFoundException(message='Agent not found')
+        balances: list[AssetBalance] = []
+        for collateral in SUPPORTED_COLLATERALS:
+            balance = await self._get_erc20_balance(tokenAddress=collateral.address, walletAddress=agent.walletAddress)
+            try:
+                priceUsd = await self._get_asset_price(assetAddress=collateral.address)
+                balanceUsd = balance * priceUsd / (10 ** collateral.decimals)
+            except Exception:  # noqa: BLE001
+                balanceUsd = 0.0
+            balances.append(
+                AssetBalance(
+                    asset_address=collateral.address,
+                    asset_symbol=collateral.symbol,
+                    asset_decimals=collateral.decimals,
+                    balance=str(balance),
+                    balance_usd=balanceUsd,
+                )
             )
-            for action in actions
-        ]
+        return Wallet(wallet_address=agent.walletAddress, asset_balances=balances)
+
+    async def get_agent_ens_constitution(self, agent_id: str) -> EnsConstitutionResource:
+        """Get ENS constitution for a specific agent."""
+        agent = await self.databaseStore.get_agent(agentId=agent_id)
+        if agent is None:
+            raise NotFoundException(message='Agent not found')
+        if agent.ensName is None:
+            return EnsConstitutionResource(
+                ens_name=None,
+                max_ltv=None,
+                min_spread=None,
+                max_position_usd=None,
+                allowed_collateral=None,
+                pause=False,
+                status=None,
+                last_action=None,
+                last_check=None,
+            )
+        try:
+            if self.mainnetEthClient is None:
+                raise ValueError('Mainnet client not configured')
+            rawConstitution = await self.ensClient.read_text_record(ethClient=self.mainnetEthClient, ensName=agent.ensName, key='constitution')
+            if rawConstitution:
+                import json
+
+                constitution = json.loads(rawConstitution)
+                return EnsConstitutionResource(
+                    ens_name=agent.ensName,
+                    max_ltv=constitution.get('max_ltv'),
+                    min_spread=constitution.get('min_spread'),
+                    max_position_usd=constitution.get('max_position_usd'),
+                    allowed_collateral=constitution.get('allowed_collateral'),
+                    pause=constitution.get('pause', False),
+                    status=constitution.get('status'),
+                    last_action=constitution.get('last_action'),
+                    last_check=constitution.get('last_check'),
+                )
+        except Exception:  # noqa: BLE001
+            logging.exception('Failed to fetch ENS constitution')
+        return EnsConstitutionResource(
+            ens_name=agent.ensName,
+            max_ltv=None,
+            min_spread=None,
+            max_position_usd=None,
+            allowed_collateral=None,
+            pause=False,
+            status=None,
+            last_action=None,
+            last_check=None,
+        )

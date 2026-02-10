@@ -1,5 +1,6 @@
 export { AccountPage } from './AccountPage';
 export { AgentPage } from './AgentPage';
+export { AgentsPage } from './AgentsPage';
 export { CreateAgentPage } from './CreateAgentPage';
 export { DeployAgentPage } from './DeployAgentPage';
 export { FundAgentPage } from './FundAgentPage';

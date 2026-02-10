@@ -22,10 +22,10 @@ interface DeployStepInfo {
 
 const DEPLOY_STEPS: DeployStepInfo[] = [
   { id: 'initializing', label: 'Initializing agent wallet', activeLabel: 'Initializing agent wallet...' },
-  { id: 'approving', label: 'Approving collateral', activeLabel: 'Approving collateral...' },
   { id: 'depositing', label: 'Depositing collateral', activeLabel: 'Depositing collateral...' },
   { id: 'borrowing', label: 'Borrowing USDC', activeLabel: 'Borrowing USDC...' },
   { id: 'vaulting', label: 'Depositing to yield vault', activeLabel: 'Depositing to yield vault...' },
+  { id: 'approving', label: 'Setting on-chain constitution with ENS', activeLabel: 'Setting on-chain constitution with ENS...' },
 ];
 
 export function DeployAgentPage(): React.ReactElement {
@@ -66,12 +66,13 @@ export function DeployAgentPage(): React.ReactElement {
     hasStartedRef.current = true;
     setIsDeploying(true);
     setError(null);
+    const ensStepIndex = DEPLOY_STEPS.length - 1;
     let stepInterval: ReturnType<typeof setInterval> | null = null;
     try {
       setCurrentStepIndex(0);
       stepInterval = setInterval(() => {
         setCurrentStepIndex((prev) => {
-          if (prev < DEPLOY_STEPS.length - 1) {
+          if (prev < ensStepIndex - 1) {
             return prev + 1;
           }
           return prev;
@@ -86,10 +87,24 @@ export function DeployAgentPage(): React.ReactElement {
         authToken,
       );
       clearInterval(stepInterval);
-      setCurrentStepIndex(DEPLOY_STEPS.length);
+      stepInterval = null;
       if (result.transactionHash) {
         setTransactionHash(result.transactionHash);
       }
+      // ENS registration as the final step (non-blocking)
+      setCurrentStepIndex(ensStepIndex);
+      try {
+        await moneyHackClient.registerEns(
+          accountAddress,
+          agentId,
+          collateralAddress,
+          parseFloat(ltvStr),
+          authToken,
+        );
+      } catch (ensError) {
+        console.error('ENS registration failed (non-blocking):', ensError);
+      }
+      setCurrentStepIndex(DEPLOY_STEPS.length);
       setIsDeployed(true);
     } catch (caughtError) {
       if (stepInterval) clearInterval(stepInterval);
@@ -226,7 +241,7 @@ export function DeployAgentPage(): React.ReactElement {
                       <Spacing />
                     </Stack>
                   </LinkBase>
-                  <LinkBase className='actionCard' target='/agent' isFullWidth={true}>
+                  <LinkBase className='actionCard' target='/agents' isFullWidth={true}>
                     <Stack direction={Direction.Horizontal} isFullWidth={true} isFullHeight={true} shouldAddGutters={true} childAlignment={Alignment.Center} contentAlignment={Alignment.Start} paddingVertical={PaddingSize.Default} paddingHorizontal={PaddingSize.Default}>
                       <Box className='actionCardIcon'>
                         <KibaIcon iconId='ion-trending-up' />

@@ -224,6 +224,7 @@ export class ClosePositionResponse extends ResponseData {
     readonly vaultWithdrawAmount: string,
     readonly morphoAddress: string,
     readonly vaultAddress: string,
+    readonly transactionHash: string | null,
   ) {
     super();
   }
@@ -237,6 +238,7 @@ export class ClosePositionResponse extends ResponseData {
       String(obj.vault_withdraw_amount),
       String(obj.morpho_address),
       String(obj.vault_address),
+      obj.transaction_hash ? String(obj.transaction_hash) : null,
     );
   };
 }
@@ -421,6 +423,30 @@ export class GetAgentResponse extends ResponseData {
   };
 }
 
+export class GetAgentsRequest extends RequestData {
+  public constructor() {
+    super();
+  }
+
+  public toObject = (): RawObject => {
+    return {};
+  };
+}
+
+export class GetAgentsResponse extends ResponseData {
+  public constructor(
+    readonly agents: Resources.Agent[],
+  ) {
+    super();
+  }
+
+  public static fromObject = (obj: RawObject): GetAgentsResponse => {
+    return new GetAgentsResponse(
+      (obj.agents as RawObject[]).map((agent: RawObject): Resources.Agent => Resources.Agent.fromObject(agent)),
+    );
+  };
+}
+
 export class CreateAgentRequest extends RequestData {
   public constructor(
     readonly name: string,
@@ -481,6 +507,38 @@ export class DeployAgentResponse extends ResponseData {
     return new DeployAgentResponse(
       Resources.Position.fromObject(obj.position as RawObject),
       obj.transaction_hash ? String(obj.transaction_hash) : null,
+    );
+  };
+}
+
+export class RegisterEnsRequest extends RequestData {
+  public constructor(
+    readonly collateralAssetAddress: string,
+    readonly targetLtv: number,
+  ) {
+    super();
+  }
+
+  public toObject = (): RawObject => {
+    return {
+      collateral_asset_address: this.collateralAssetAddress,
+      target_ltv: this.targetLtv,
+    };
+  };
+}
+
+export class RegisterEnsResponse extends ResponseData {
+  public constructor(
+    readonly ensName: string | null,
+    readonly success: boolean,
+  ) {
+    super();
+  }
+
+  public static fromObject = (obj: RawObject): RegisterEnsResponse => {
+    return new RegisterEnsResponse(
+      obj.ens_name ? String(obj.ens_name) : null,
+      Boolean(obj.success),
     );
   };
 }
@@ -639,102 +697,110 @@ export class SetEnsConstitutionResponse extends ResponseData {
   };
 }
 
-export class GetCrossChainActionsRequest extends RequestData {
+export class PreviewAgentNameRequest extends RequestData {
   public constructor(
-    readonly limit: number,
+    readonly name: string,
   ) {
     super();
   }
 
   public toObject = (): RawObject => {
     return {
-      limit: this.limit,
+      name: this.name,
     };
   };
 }
 
-export class GetCrossChainActionsResponse extends ResponseData {
+export class PreviewAgentNameResponse extends ResponseData {
   public constructor(
-    readonly actions: Resources.CrossChainAction[],
+    readonly name: string,
+    readonly label: string,
+    readonly fullEnsName: string,
+    readonly available: boolean,
+    readonly error: string | null,
   ) {
     super();
   }
 
-  public static fromObject = (obj: RawObject): GetCrossChainActionsResponse => {
-    return new GetCrossChainActionsResponse(
-      (obj.actions as RawObject[]).map(Resources.CrossChainAction.fromObject),
+  public static fromObject = (obj: RawObject): PreviewAgentNameResponse => {
+    return new PreviewAgentNameResponse(
+      String(obj.name),
+      String(obj.label),
+      String(obj.full_ens_name),
+      Boolean(obj.available),
+      obj.error ? String(obj.error) : null,
     );
   };
 }
 
-export class CrossChainWithdrawRequest extends RequestData {
-  public constructor(
-    readonly amount: string,
-    readonly to_chain: number,
-    readonly to_token: string,
-    readonly to_address: string,
-  ) {
+export class GetAgentPositionRequest extends RequestData {
+  public constructor() {
     super();
   }
 
   public toObject = (): RawObject => {
-    return {
-      amount: this.amount,
-      to_chain: this.to_chain,
-      to_token: this.to_token,
-      to_address: this.to_address,
-    };
+    return {};
   };
 }
 
-export class CrossChainWithdrawResponse extends ResponseData {
+export class GetAgentPositionResponse extends ResponseData {
   public constructor(
-    readonly action: Resources.CrossChainAction,
+    readonly position: Resources.Position | null,
   ) {
     super();
   }
 
-  public static fromObject = (obj: RawObject): CrossChainWithdrawResponse => {
-    return new CrossChainWithdrawResponse(
-      Resources.CrossChainAction.fromObject(obj.action as RawObject),
+  public static fromObject = (obj: RawObject): GetAgentPositionResponse => {
+    return new GetAgentPositionResponse(
+      obj.position ? Resources.Position.fromObject(obj.position as RawObject) : null,
     );
   };
 }
 
-export class RecordCrossChainDepositRequest extends RequestData {
-  public constructor(
-    readonly from_chain: number,
-    readonly from_token: string,
-    readonly to_token: string,
-    readonly amount: string,
-    readonly tx_hash: string | null,
-    readonly bridge_name: string | null,
-  ) {
+export class GetAgentWalletRequest extends RequestData {
+  public constructor() {
     super();
   }
 
   public toObject = (): RawObject => {
-    return {
-      from_chain: this.from_chain,
-      from_token: this.from_token,
-      to_token: this.to_token,
-      amount: this.amount,
-      tx_hash: this.tx_hash,
-      bridge_name: this.bridge_name,
-    };
+    return {};
   };
 }
 
-export class RecordCrossChainDepositResponse extends ResponseData {
+export class GetAgentWalletResponse extends ResponseData {
   public constructor(
-    readonly action: Resources.CrossChainAction,
+    readonly wallet: Resources.Wallet,
   ) {
     super();
   }
 
-  public static fromObject = (obj: RawObject): RecordCrossChainDepositResponse => {
-    return new RecordCrossChainDepositResponse(
-      Resources.CrossChainAction.fromObject(obj.action as RawObject),
+  public static fromObject = (obj: RawObject): GetAgentWalletResponse => {
+    return new GetAgentWalletResponse(
+      Resources.Wallet.fromObject(obj.wallet as RawObject),
+    );
+  };
+}
+
+export class GetAgentEnsConstitutionRequest extends RequestData {
+  public constructor() {
+    super();
+  }
+
+  public toObject = (): RawObject => {
+    return {};
+  };
+}
+
+export class GetAgentEnsConstitutionResponse extends ResponseData {
+  public constructor(
+    readonly constitution: Resources.EnsConstitution,
+  ) {
+    super();
+  }
+
+  public static fromObject = (obj: RawObject): GetAgentEnsConstitutionResponse => {
+    return new GetAgentEnsConstitutionResponse(
+      Resources.EnsConstitution.fromObject(obj.constitution as RawObject),
     );
   };
 }

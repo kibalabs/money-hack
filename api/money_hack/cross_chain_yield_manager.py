@@ -92,8 +92,11 @@ class CrossChainManager:
         except Exception as e:
             logging.exception(f'Failed to record cross-chain deposit: {e}')
             return CrossChainResult(
-                success=False, action_id=None, amount=amount,
-                from_chain=fromChain, to_chain=BASE_CHAIN_ID,
+                success=False,
+                action_id=None,
+                amount=amount,
+                from_chain=fromChain,
+                to_chain=BASE_CHAIN_ID,
                 reason=f'Failed to record: {e}',
             )
 
@@ -113,16 +116,22 @@ class CrossChainManager:
         """
         if usdcAmount / 1e6 < MIN_CROSS_CHAIN_AMOUNT_USD:
             return CrossChainResult(
-                success=False, action_id=None, amount=str(usdcAmount),
-                from_chain=BASE_CHAIN_ID, to_chain=toChain,
+                success=False,
+                action_id=None,
+                amount=str(usdcAmount),
+                from_chain=BASE_CHAIN_ID,
+                to_chain=toChain,
                 reason=f'Amount ${usdcAmount / 1e6:.2f} below minimum ${MIN_CROSS_CHAIN_AMOUNT_USD}',
             )
         pending = await self.databaseStore.get_pending_cross_chain_actions(agentId=agentId)
         pendingWithdrawals = [a for a in pending if a.actionType == 'withdraw']
         if pendingWithdrawals:
             return CrossChainResult(
-                success=False, action_id=None, amount=str(usdcAmount),
-                from_chain=BASE_CHAIN_ID, to_chain=toChain,
+                success=False,
+                action_id=None,
+                amount=str(usdcAmount),
+                from_chain=BASE_CHAIN_ID,
+                to_chain=toChain,
                 reason=f'Existing in-flight withdrawal ({len(pendingWithdrawals)} pending)',
             )
         try:
@@ -171,8 +180,11 @@ class CrossChainManager:
         except Exception as e:
             logging.exception(f'Failed to get LI.FI quote for cross-chain withdrawal: {e}')
             return CrossChainResult(
-                success=False, action_id=None, amount=str(usdcAmount),
-                from_chain=BASE_CHAIN_ID, to_chain=toChain,
+                success=False,
+                action_id=None,
+                amount=str(usdcAmount),
+                from_chain=BASE_CHAIN_ID,
+                to_chain=toChain,
                 reason=f'LI.FI quote failed: {e}',
             )
 
@@ -208,12 +220,14 @@ class CrossChainManager:
                         },
                     )
                     logging.info(f'Cross-chain action {action.crossChainActionId} status: {action.status} -> {newStatus}')
-                results.append(CrossChainStatusResult(
-                    action_id=action.crossChainActionId,
-                    old_status=action.status,
-                    new_status=newStatus,
-                    is_complete=newStatus in ('completed', 'failed'),
-                ))
+                results.append(
+                    CrossChainStatusResult(
+                        action_id=action.crossChainActionId,
+                        old_status=action.status,
+                        new_status=newStatus,
+                        is_complete=newStatus in ('completed', 'failed'),
+                    )
+                )
             except Exception:
                 logging.exception(f'Failed to check status for cross-chain action {action.crossChainActionId}')
         return results

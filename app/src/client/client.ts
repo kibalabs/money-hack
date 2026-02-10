@@ -47,33 +47,37 @@ export class MoneyHackClient extends ServiceClient {
     return new Resources.CreatePositionResult(response.position, response.agent);
   };
 
-  public getPosition = async (userAddress: string, authToken: string): Promise<Resources.Position | null> => {
+  public getPosition = async (userAddress: string, authToken: string, agentId?: string): Promise<Resources.Position | null> => {
     const method = RestMethod.GET;
-    const path = `v1/users/${userAddress}/position`;
+    const agentQuery = agentId ? `?agentId=${agentId}` : '';
+    const path = `v1/users/${userAddress}/position${agentQuery}`;
     const request = new Endpoints.GetPositionRequest();
     const response = await this.makeRequest(method, path, request, Endpoints.GetPositionResponse, this.getHeaders(authToken));
     return response.position;
   };
 
-  public getWithdrawTransactions = async (userAddress: string, amount: bigint, authToken: string): Promise<Endpoints.WithdrawResponse> => {
+  public getWithdrawTransactions = async (userAddress: string, amount: bigint, authToken: string, agentId?: string): Promise<Endpoints.WithdrawResponse> => {
     const method = RestMethod.POST;
-    const path = `v1/users/${userAddress}/position/withdraw`;
+    const agentQuery = agentId ? `?agentId=${agentId}` : '';
+    const path = `v1/users/${userAddress}/position/withdraw${agentQuery}`;
     const request = new Endpoints.WithdrawRequest(amount.toString());
     const response = await this.makeRequest(method, path, request, Endpoints.WithdrawResponse, this.getHeaders(authToken));
     return response;
   };
 
-  public getWithdrawPreview = async (userAddress: string, amount: bigint, authToken: string): Promise<Resources.WithdrawPreview> => {
+  public getWithdrawPreview = async (userAddress: string, amount: bigint, authToken: string, agentId?: string): Promise<Resources.WithdrawPreview> => {
     const method = RestMethod.POST;
-    const path = `v1/users/${userAddress}/position/withdraw/preview`;
+    const agentQuery = agentId ? `?agentId=${agentId}` : '';
+    const path = `v1/users/${userAddress}/position/withdraw/preview${agentQuery}`;
     const request = new Endpoints.WithdrawPreviewRequest(amount.toString());
     const response = await this.makeRequest(method, path, request, Endpoints.WithdrawPreviewResponse, this.getHeaders(authToken));
     return response.preview;
   };
 
-  public getClosePositionTransactions = async (userAddress: string, authToken: string): Promise<Endpoints.ClosePositionResponse> => {
+  public getClosePositionTransactions = async (userAddress: string, authToken: string, agentId?: string): Promise<Endpoints.ClosePositionResponse> => {
     const method = RestMethod.POST;
-    const path = `v1/users/${userAddress}/position/close`;
+    const agentQuery = agentId ? `?agentId=${agentId}` : '';
+    const path = `v1/users/${userAddress}/position/close${agentQuery}`;
     const request = new Endpoints.ClosePositionRequest();
     const response = await this.makeRequest(method, path, request, Endpoints.ClosePositionResponse, this.getHeaders(authToken));
     return response;
@@ -135,6 +139,14 @@ export class MoneyHackClient extends ServiceClient {
     return response.agent;
   };
 
+  public getAgents = async (userAddress: string, authToken: string): Promise<Resources.Agent[]> => {
+    const method = RestMethod.GET;
+    const path = `v1/users/${userAddress}/agents`;
+    const request = new Endpoints.GetAgentsRequest();
+    const response = await this.makeRequest(method, path, request, Endpoints.GetAgentsResponse, this.getHeaders(authToken));
+    return response.agents;
+  };
+
   public createAgent = async (userAddress: string, name: string, emoji: string, authToken: string): Promise<Resources.Agent> => {
     const method = RestMethod.POST;
     const path = `v1/users/${userAddress}/agent`;
@@ -149,6 +161,14 @@ export class MoneyHackClient extends ServiceClient {
     const request = new Endpoints.DeployAgentRequest(collateralAssetAddress, collateralAmount.toString(), targetLtv);
     const response = await this.makeRequest(method, path, request, Endpoints.DeployAgentResponse, this.getHeaders(authToken));
     return new Resources.DeployAgentResult(response.position, response.transactionHash);
+  };
+
+  public registerEns = async (userAddress: string, agentId: string, collateralAssetAddress: string, targetLtv: number, authToken: string): Promise<{ ensName: string | null; success: boolean }> => {
+    const method = RestMethod.POST;
+    const path = `v1/users/${userAddress}/agents/${agentId}/register-ens`;
+    const request = new Endpoints.RegisterEnsRequest(collateralAssetAddress, targetLtv);
+    const response = await this.makeRequest(method, path, request, Endpoints.RegisterEnsResponse, this.getHeaders(authToken));
+    return { ensName: response.ensName, success: response.success };
   };
 
   public sendChatMessage = async (userAddress: string, agentId: string, message: string, conversationId: string | null, authToken: string): Promise<Resources.ChatResponse> => {
@@ -175,43 +195,53 @@ export class MoneyHackClient extends ServiceClient {
     return response.actions;
   };
 
-  public getEnsConstitution = async (userAddress: string, authToken: string): Promise<Resources.EnsConstitution> => {
+  public getEnsConstitution = async (userAddress: string, authToken: string, agentId?: string): Promise<Resources.EnsConstitution> => {
     const method = RestMethod.GET;
-    const path = `v1/users/${userAddress}/ens/constitution`;
+    const agentQuery = agentId ? `?agentId=${agentId}` : '';
+    const path = `v1/users/${userAddress}/ens/constitution${agentQuery}`;
     const request = new Endpoints.GetEnsConstitutionRequest();
     const response = await this.makeRequest(method, path, request, Endpoints.GetEnsConstitutionResponse, this.getHeaders(authToken));
     return response.constitution;
   };
 
-  public setEnsConstitution = async (userAddress: string, maxLtv: number | null, minSpread: number | null, maxPositionUsd: number | null, allowedCollateral: string | null, pause: boolean, authToken: string): Promise<Resources.EnsConstitution> => {
+  public setEnsConstitution = async (userAddress: string, maxLtv: number | null, minSpread: number | null, maxPositionUsd: number | null, allowedCollateral: string | null, pause: boolean, authToken: string, agentId?: string): Promise<Resources.EnsConstitution> => {
     const method = RestMethod.POST;
-    const path = `v1/users/${userAddress}/ens/constitution`;
+    const agentQuery = agentId ? `?agentId=${agentId}` : '';
+    const path = `v1/users/${userAddress}/ens/constitution${agentQuery}`;
     const request = new Endpoints.SetEnsConstitutionRequest(maxLtv, minSpread, maxPositionUsd, allowedCollateral, pause);
     const response = await this.makeRequest(method, path, request, Endpoints.SetEnsConstitutionResponse, this.getHeaders(authToken));
     return response.constitution;
   };
 
-  public getCrossChainActions = async (userAddress: string, limit: number, authToken: string): Promise<Resources.CrossChainAction[]> => {
+  public previewAgentName = async (name: string): Promise<Endpoints.PreviewAgentNameResponse> => {
+    const method = RestMethod.POST;
+    const path = 'v1/agent-name/preview';
+    const request = new Endpoints.PreviewAgentNameRequest(name);
+    const response = await this.makeRequest(method, path, request, Endpoints.PreviewAgentNameResponse, this.getHeaders(null));
+    return response;
+  };
+
+  public getAgentPosition = async (agentId: string, authToken: string): Promise<Resources.Position | null> => {
     const method = RestMethod.GET;
-    const path = `v1/users/${userAddress}/cross-chain-actions`;
-    const request = new Endpoints.GetCrossChainActionsRequest(limit);
-    const response = await this.makeRequest(method, path, request, Endpoints.GetCrossChainActionsResponse, this.getHeaders(authToken));
-    return response.actions;
+    const path = `v1/agents/${agentId}/position`;
+    const request = new Endpoints.GetAgentPositionRequest();
+    const response = await this.makeRequest(method, path, request, Endpoints.GetAgentPositionResponse, this.getHeaders(authToken));
+    return response.position;
   };
 
-  public crossChainWithdraw = async (userAddress: string, amount: string, toChain: number, toToken: string, toAddress: string, authToken: string): Promise<Resources.CrossChainAction> => {
-    const method = RestMethod.POST;
-    const path = `v1/users/${userAddress}/cross-chain-withdraw`;
-    const request = new Endpoints.CrossChainWithdrawRequest(amount, toChain, toToken, toAddress);
-    const response = await this.makeRequest(method, path, request, Endpoints.CrossChainWithdrawResponse, this.getHeaders(authToken));
-    return response.action;
+  public getAgentWallet = async (agentId: string, authToken: string): Promise<Resources.Wallet> => {
+    const method = RestMethod.GET;
+    const path = `v1/agents/${agentId}/wallet`;
+    const request = new Endpoints.GetAgentWalletRequest();
+    const response = await this.makeRequest(method, path, request, Endpoints.GetAgentWalletResponse, this.getHeaders(authToken));
+    return response.wallet;
   };
 
-  public recordCrossChainDeposit = async (userAddress: string, fromChain: number, fromToken: string, toToken: string, amount: string, txHash: string | null, bridgeName: string | null, authToken: string): Promise<Resources.CrossChainAction> => {
-    const method = RestMethod.POST;
-    const path = `v1/users/${userAddress}/cross-chain-deposit`;
-    const request = new Endpoints.RecordCrossChainDepositRequest(fromChain, fromToken, toToken, amount, txHash, bridgeName);
-    const response = await this.makeRequest(method, path, request, Endpoints.RecordCrossChainDepositResponse, this.getHeaders(authToken));
-    return response.action;
+  public getAgentEnsConstitution = async (agentId: string, authToken: string): Promise<Resources.EnsConstitution> => {
+    const method = RestMethod.GET;
+    const path = `v1/agents/${agentId}/ens-constitution`;
+    const request = new Endpoints.GetAgentEnsConstitutionRequest();
+    const response = await this.makeRequest(method, path, request, Endpoints.GetAgentEnsConstitutionResponse, this.getHeaders(authToken));
+    return response.constitution;
   };
 }
