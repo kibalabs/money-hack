@@ -25,7 +25,6 @@ const DEPLOY_STEPS: DeployStepInfo[] = [
   { id: 'depositing', label: 'Depositing collateral', activeLabel: 'Depositing collateral...' },
   { id: 'borrowing', label: 'Borrowing USDC', activeLabel: 'Borrowing USDC...' },
   { id: 'vaulting', label: 'Depositing to yield vault', activeLabel: 'Depositing to yield vault...' },
-  { id: 'approving', label: 'Setting on-chain constitution with ENS', activeLabel: 'Setting on-chain constitution with ENS...' },
 ];
 
 export function DeployAgentPage(): React.ReactElement {
@@ -66,13 +65,12 @@ export function DeployAgentPage(): React.ReactElement {
     hasStartedRef.current = true;
     setIsDeploying(true);
     setError(null);
-    const ensStepIndex = DEPLOY_STEPS.length - 1;
     let stepInterval: ReturnType<typeof setInterval> | null = null;
     try {
       setCurrentStepIndex(0);
       stepInterval = setInterval(() => {
         setCurrentStepIndex((prev) => {
-          if (prev < ensStepIndex - 1) {
+          if (prev < DEPLOY_STEPS.length - 2) {
             return prev + 1;
           }
           return prev;
@@ -90,19 +88,6 @@ export function DeployAgentPage(): React.ReactElement {
       stepInterval = null;
       if (result.transactionHash) {
         setTransactionHash(result.transactionHash);
-      }
-      // ENS registration as the final step (non-blocking)
-      setCurrentStepIndex(ensStepIndex);
-      try {
-        await moneyHackClient.registerEns(
-          accountAddress,
-          agentId,
-          collateralAddress,
-          parseFloat(ltvStr),
-          authToken,
-        );
-      } catch (ensError) {
-        console.error('ENS registration failed (non-blocking):', ensError);
       }
       setCurrentStepIndex(DEPLOY_STEPS.length);
       setIsDeployed(true);

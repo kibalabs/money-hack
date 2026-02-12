@@ -160,6 +160,7 @@ class AgentManager(Authorizer):  # Core manager
         self.crossChainManager = crossChainManager
         self._signatureSignerMap: dict[str, str] = {}
         self._userConfigsCache: dict[str, UserConfig] = {}
+        self._lastDailyDigestSent: dict[str, datetime] = {}
 
     async def _get_asset_price(self, assetAddress: str) -> float:
         """Get the current USD price for an asset. Tries Alchemy first, falls back to Moralis."""
@@ -778,9 +779,11 @@ class AgentManager(Authorizer):  # Core manager
                             currentLtv=currentLtv,
                             maxLtv=maxLtv,
                         )
-                # Status notification - send every check cycle (every 5 minutes)
-                # No throttling for demo purposes
-                if hasPositionValue:
+                DAILY_DIGEST_INTERVAL_SECONDS = 86400
+                now = datetime.now(UTC)
+                lastSent = self._lastDailyDigestSent.get(position.agentId)
+                shouldSendDigest = lastSent is None or (now - lastSent).total_seconds() >= DAILY_DIGEST_INTERVAL_SECONDS
+                if hasPositionValue and shouldSendDigest and not result.needs_action:
                     priceData = await self.alchemyClient.get_asset_current_price(chainId=self.chainId, assetAddress=position.collateralAsset)
                     collateralValue = (onchainCollateral / (10**collateralDecimals)) * priceData.priceUsd
                     debtValue = onchainBorrow / 1e6
@@ -791,6 +794,7 @@ class AgentManager(Authorizer):  # Core manager
                         collateralValue=collateralValue,
                         debtValue=debtValue,
                     )
+                    self._lastDailyDigestSent[position.agentId] = now
                 # ENS status writes are on mainnet — too expensive for every check cycle.
                 # Status is written via scripts/set_ens_constitution.py when needed.
             except Exception:  # noqa: BLE001
